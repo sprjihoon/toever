@@ -344,12 +344,15 @@ export async function importEzadminInvoice(params: {
       }
     }
 
-    // 원본 파일 저장
-    const fileStat = fs.statSync(params.filePath)
+    // 원본 파일을 raw 저장소로 복사 (사용자 선택 파일이 삭제되어도 보존)
+    const rawDir  = DIRS.rawEzadminInvoice()
+    const destName = `${buildDatePrefix()}_${path.basename(params.filePath)}`
+    const destPath = saveRawFile(rawDir, destName, fs.readFileSync(params.filePath))
+    const fileStat = fs.statSync(destPath)
     saveFileArtifact({
       artifact_type: 'EZADMIN_INVOICE_RAW',
       original_filename: path.basename(params.filePath),
-      stored_path: params.filePath,
+      stored_path: destPath,  // 복사된 경로 저장
       sha256: fileHash,
       size_bytes: fileStat.size,
       run_id: params.run_id ?? null,
@@ -382,9 +385,8 @@ export async function importEzadminInvoice(params: {
     const evRepo = invoiceEventRepo()
 
     for (const [order_no, data] of grouped.entries()) {
-      const order = await Promise.resolve(
-        db.prepare('SELECT * FROM order_header WHERE toever_order_no = ?').get(order_no)
-      ) as { id: number } | undefined
+      // better-sqlite3는 동기 API - await Promise.resolve() 불필요
+      const order = db.prepare('SELECT * FROM order_header WHERE toever_order_no = ?').get(order_no) as { id: number } | undefined
 
       if (!order) {
         orphan++

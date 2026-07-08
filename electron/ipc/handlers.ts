@@ -65,7 +65,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       }
       if (settings.storage_base_path) {
         setBasePath(settings.storage_base_path)
-        try { ensureAllDirs() } catch { /* ?? ??? ?? */ }
+        try { ensureAllDirs() } catch { /* ???? ?? ?? ?? */ }
       }
       return { success: true }
     } catch (e) {
@@ -177,7 +177,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('invoice:selectFile', async () => {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: '????? ?? ?? ??',
+        title: '????? ?????? ?? ??',
         filters: [
           { name: 'Excel Files', extensions: ['xls', 'xlsx'] },
           { name: 'All Files', extensions: ['*'] },
@@ -205,7 +205,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         return { success: false, error: '??? ID/????? ???? ?????.' }
       }
       if (isLocked('upload_toever_invoice')) {
-        return { success: false, error: '?? ??? ????.' }
+        return { success: false, error: '?? ?? ????.' }
       }
 
       const result = await uploadToeverInvoiceFile({
@@ -389,7 +389,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     return { success: true }
   })
 
-  // ? ?? ?? (?? ??? ??? true)
+  // ? ?? ?? (?? ???? ??? true)
   ipcMain.handle('app:isFirstRun', async () => {
     try {
       const stats = getDashboardStats(new Date().toISOString().slice(0, 10))

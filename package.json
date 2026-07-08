@@ -9,7 +9,7 @@
     "dev:electron": "wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .",
     "build:electron": "tsc -p tsconfig.node.json",
     "build:renderer": "vite build",
-    "rebuild:native": "electron-rebuild -f -w better-sqlite3",
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3 --module-dir .",
     "build": "npm run build:electron && npm run build:renderer && electron-builder --config electron-builder.yml",
     "build:dir": "npm run build:electron && npm run build:renderer && electron-builder --dir --config electron-builder.yml",
     "preview": "vite preview",
