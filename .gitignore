@@ -1,0 +1,23 @@
+node_modules/
+dist/
+dist-electron/
+release/
+*.db
+*.db-shm
+*.db-wal
+*.log
+logs/
+*.env
+.env.*
+
+# 런타임 생성 파일
+D:/SpringToeverOps/
+E:/SpringToeverOpsBackup/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+.idea/

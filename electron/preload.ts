@@ -1,0 +1,78 @@
+import { contextBridge, ipcRenderer } from 'electron'
+
+const api = {
+  // 설정
+  settings: {
+    getAll: () => ipcRenderer.invoke('settings:getAll'),
+    save: (settings: unknown) => ipcRenderer.invoke('settings:save', settings),
+  },
+
+  // 대시보드
+  dashboard: {
+    getStats: (today: string) => ipcRenderer.invoke('dashboard:getStats', today),
+  },
+
+  // 주문
+  orders: {
+    search: (params: unknown) => ipcRenderer.invoke('orders:search', params),
+    getDetail: (id: number) => ipcRenderer.invoke('orders:getDetail', id),
+    collect: (params: unknown) => ipcRenderer.invoke('orders:collect', params),
+  },
+
+  // 이지어드민
+  ezadmin: {
+    generateUploadFile: (businessDate: string) => ipcRenderer.invoke('ezadmin:generateUploadFile', businessDate),
+  },
+
+  // 송장
+  invoice: {
+    importEzadmin: (params: unknown) => ipcRenderer.invoke('invoice:importEzadmin', params),
+    selectFile: () => ipcRenderer.invoke('invoice:selectFile'),
+    uploadToever: () => ipcRenderer.invoke('invoice:uploadToever'),
+  },
+
+  // 배치
+  batch: {
+    getActive: () => ipcRenderer.invoke('batch:getActive'),
+    cancel: (id: number, reason: string) => ipcRenderer.invoke('batch:cancel', id, reason),
+  },
+
+  // 수동검토
+  review: {
+    getOpen: () => ipcRenderer.invoke('review:getOpen'),
+    getAll: (limit: number, offset: number) => ipcRenderer.invoke('review:getAll', limit, offset),
+    updateStatus: (id: number, status: string, memo?: string, resolvedBy?: string) =>
+      ipcRenderer.invoke('review:updateStatus', id, status, memo, resolvedBy),
+  },
+
+  // 백업
+  backup: {
+    status:     ()                              => ipcRenderer.invoke('backup:status'),
+    run:        (type?: 'AUTO' | 'MANUAL')      => ipcRenderer.invoke('backup:run', type),
+    getHistory: (limit?: number)                => ipcRenderer.invoke('backup:getHistory', limit),
+    onProgress: (cb: (p: unknown) => void) => {
+      const handler = (_: unknown, p: unknown) => cb(p)
+      ipcRenderer.on('backup:progress', handler)
+      return () => ipcRenderer.removeListener('backup:progress', handler)
+    },
+  },
+
+  // 파일 시스템
+  fs: {
+    openFolder: (folderPath: string) => ipcRenderer.invoke('fs:openFolder', folderPath),
+    storageStatus: () => ipcRenderer.invoke('fs:storageStatus'),
+  },
+
+  // 자동화 이벤트 구독
+  onAutomationEvent: (callback: (event: string, data: unknown) => void) => {
+    const handler = (_: unknown, payload: { event: string; data: unknown }) => {
+      callback(payload.event, payload.data)
+    }
+    ipcRenderer.on('automation:event', handler)
+    return () => ipcRenderer.removeListener('automation:event', handler)
+  },
+}
+
+contextBridge.exposeInMainWorld('toeverApi', api)
+
+export type ToeverApi = typeof api
