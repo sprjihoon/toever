@@ -16,7 +16,7 @@ import {
   getLastBackup,
 } from '../services/backup'
 import { restoreFromBackup, validateBackupFolder } from '../services/restore'
-import { savePassword, loadPassword } from '../services/credential'
+import { savePassword, loadPassword, hasPasswordStored } from '../services/credential'
 import { ensureAllDirs, isStorageAvailable, setBasePath } from '../services/storage'
 import { isChromiumInstalled, installChromium } from '../services/playwright/browserManager'
 import { restartScheduler } from '../services/scheduler'
@@ -38,7 +38,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         success: true,
         data: {
           toever_id:              all['toever_id'] ?? '',
-          toever_password:        loadPassword(),
+          toever_password:        '',               // 실제 비밀번호는 노출하지 않음
+          has_stored_password:    hasPasswordStored(),  // 저장 여부 플래그만 반환
           storage_base_path:      all['storage_base_path'] ?? '',
           backup_path:            all['backup_path'] ?? '',
           company_cd:             all['company_cd'] ?? '01',
@@ -62,8 +63,11 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
       for (const [key, value] of Object.entries(settings)) {
         if (key === 'toever_password') {
-          savePassword(String(value))
-        } else {
+          // 빈 문자열이면 기존 비밀번호 유지 (변경 의도 없음)
+          if (String(value).trim() !== '') {
+            savePassword(String(value))
+          }
+        } else if (key !== 'has_stored_password') {
           setSetting(key, String(value))
         }
       }

@@ -17,34 +17,36 @@ const DEFAULT_SETTINGS: AppSettings = {
 }
 
 export default function Settings() {
-  const [settings, setSettings]         = useState<AppSettings>(DEFAULT_SETTINGS)
-  const [saving, setSaving]             = useState(false)
-  const [saved, setSaved]               = useState(false)
-  const [needsRestart, setNeedsRestart] = useState(false)
-  const [storageOk, setStorageOk]       = useState<boolean | null>(null)
-  const [showPassword, setShowPassword] = useState(false)
-  const [showRestore, setShowRestore]   = useState(false)
-  const [chromiumOk, setChromiumOk]     = useState<boolean | null>(null)
+  const [settings, setSettings]           = useState<AppSettings>(DEFAULT_SETTINGS)
+  const [hasStoredPassword, setHasStoredPassword] = useState(false)
+  const [changingPassword, setChangingPassword]   = useState(false)
+  const [saving, setSaving]               = useState(false)
+  const [saved, setSaved]                 = useState(false)
+  const [needsRestart, setNeedsRestart]   = useState(false)
+  const [storageOk, setStorageOk]         = useState<boolean | null>(null)
+  const [showPassword, setShowPassword]   = useState(false)
+  const [showRestore, setShowRestore]     = useState(false)
+  const [chromiumOk, setChromiumOk]       = useState<boolean | null>(null)
   const [installingChromium, setInstallingChromium] = useState(false)
-  const [chromiumLog, setChromiumLog]   = useState<string[]>([])
+  const [chromiumLog, setChromiumLog]     = useState<string[]>([])
 
   useEffect(() => {
     const api = window.toeverApi
     if (!api) return
     api.settings.getAll().then(result => {
       if (result.success && result.data) {
-        const s = result.data as AppSettings
-        // storage_base_path가 빈 경우 기본 경로 로딩
+        const s = result.data as AppSettings & { has_stored_password?: boolean }
+        if (s.has_stored_password) setHasStoredPassword(true)
         if (!s.storage_base_path) {
           api.appControl.getDefaultStoragePath?.().then(r => {
             if (r?.success && r.data) {
-              setSettings(prev => ({ ...prev, ...s, storage_base_path: r.data as string }))
+              setSettings(prev => ({ ...prev, ...s, toever_password: '', storage_base_path: r.data as string }))
             } else {
-              setSettings(s)
+              setSettings({ ...s, toever_password: '' })
             }
-          }).catch(() => setSettings(s))
+          }).catch(() => setSettings({ ...s, toever_password: '' }))
         } else {
-          setSettings(s)
+          setSettings({ ...s, toever_password: '' })
         }
       }
     })
@@ -62,6 +64,12 @@ export default function Settings() {
     try {
       const result = await api.settings.save(settings)
       if (result.success) {
+        // 비밀번호를 입력했다면 이제 저장됨 상태로
+        if (settings.toever_password.trim() !== '') {
+          setHasStoredPassword(true)
+          setChangingPassword(false)
+          setSettings(s => ({ ...s, toever_password: '' }))
+        }
         setSaved(true)
         const d = result.data as { needsRestart?: boolean } | undefined
         if (d?.needsRestart) {
@@ -118,16 +126,13 @@ export default function Settings() {
     if (!api) return
     setInstallingChromium(true)
     setChromiumLog([])
-
     const unsub = api.playwright.onInstallProgress((p) => {
       const prog = p as { message: string; done: boolean }
       setChromiumLog(prev => [...prev, prog.message])
     })
-
     const r = await api.playwright.installChromium()
     unsub()
     setInstallingChromium(false)
-
     if (r.success) {
       setChromiumOk(true)
       setChromiumLog(prev => [...prev, '✓ Chromium 설치 완료'])
@@ -183,11 +188,7 @@ export default function Settings() {
     <div style={{ padding: 24, maxWidth: 640, display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#f1f5f9' }}>설정</h1>
-        <button
-          className="btn-primary"
-          onClick={handleSave}
-          disabled={saving}
-        >
+        <button className="btn-primary" onClick={handleSave} disabled={saving}>
           {saving ? '저장 중...' : saved ? '✓ 저장됨' : '저장'}
         </button>
       </div>
@@ -214,6 +215,28 @@ export default function Settings() {
 
       {/* 투에버 계정 설정 */}
       <SectionCard title="투에버 계정 설정">
+        {/* 등록된 자격증명이 있으면 안내 배너 */}
+        {settings.toever_id && hasStoredPassword && !changingPassword && (
+          <div style={{
+            padding: '10px 14px', borderRadius: 8,
+            background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <div>
+              <span style={{ fontSize: 13, color: '#86efac', fontWeight: 600 }}>✓ 자격증명 저장됨</span>
+              <span style={{ fontSize: 12, color: '#64748b', marginLeft: 8 }}>
+                ID: {settings.toever_id}
+              </span>
+            </div>
+            <button
+              onClick={() => setChangingPassword(true)}
+              style={{ ...browseBtn, fontSize: 11 }}
+            >
+              변경
+            </button>
+          </div>
+        )}
+
         <FieldRow label="투에버 ID" hint="투에버 Support 사이트 로그인 ID를 입력하세요.">
           <input
             type="text"
@@ -223,23 +246,60 @@ export default function Settings() {
             placeholder="투에버 로그인 ID"
           />
         </FieldRow>
-        <FieldRow label="비밀번호" hint="비밀번호는 Windows DPAPI로 암호화됩니다.">
-          <div style={{ display: 'flex', gap: 6 }}>
-            <input
-              type={showPassword ? 'text' : 'password'}
-              value={settings.toever_password}
-              onChange={e => setSettings(s => ({ ...s, toever_password: e.target.value }))}
-              style={{ ...inputStyle, flex: 1 }}
-              placeholder="투에버 비밀번호"
-            />
-            <button
-              style={browseBtn}
-              onClick={() => setShowPassword(v => !v)}
-            >
-              {showPassword ? '숨기기' : '보기'}
-            </button>
-          </div>
-        </FieldRow>
+
+        {/* 비밀번호: 저장됨 + 변경 모드 분기 */}
+        {hasStoredPassword && !changingPassword ? (
+          <FieldRow label="비밀번호">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{
+                flex: 1, padding: '8px 12px', borderRadius: 6,
+                background: '#0f172a', border: '1px solid #1e3a2f',
+                fontSize: 13, color: '#4ade80',
+              }}>
+                ✓ 비밀번호 저장됨 &nbsp;
+                <span style={{ color: '#334155', fontSize: 12 }}>
+                  (Windows DPAPI 암호화)
+                </span>
+              </div>
+              <button
+                onClick={() => setChangingPassword(true)}
+                style={browseBtn}
+              >
+                비밀번호 변경
+              </button>
+            </div>
+          </FieldRow>
+        ) : (
+          <FieldRow
+            label={changingPassword ? '새 비밀번호' : '비밀번호'}
+            hint="비밀번호는 Windows DPAPI로 암호화됩니다. 한 번 저장하면 앱 재시작 후에도 유지됩니다."
+          >
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={settings.toever_password}
+                onChange={e => setSettings(s => ({ ...s, toever_password: e.target.value }))}
+                style={{ ...inputStyle, flex: 1 }}
+                placeholder={changingPassword ? '새 비밀번호 입력' : '투에버 비밀번호'}
+                autoFocus={changingPassword}
+              />
+              <button style={browseBtn} onClick={() => setShowPassword(v => !v)}>
+                {showPassword ? '숨기기' : '보기'}
+              </button>
+              {changingPassword && (
+                <button
+                  style={{ ...browseBtn, color: '#ef4444', borderColor: '#ef4444' }}
+                  onClick={() => {
+                    setChangingPassword(false)
+                    setSettings(s => ({ ...s, toever_password: '' }))
+                  }}
+                >
+                  취소
+                </button>
+              )}
+            </div>
+          </FieldRow>
+        )}
       </SectionCard>
 
       {/* 저장소 설정 */}
@@ -253,12 +313,8 @@ export default function Settings() {
               style={{ ...inputStyle, flex: 1 }}
               placeholder="예: C:\Users\홍길동\Documents\SpringToeverOps"
             />
-            <button style={browseBtn} onClick={handleBrowseStorage}>
-              찾아보기
-            </button>
-            <button style={browseBtn} onClick={handleTestStorage}>
-              확인
-            </button>
+            <button style={browseBtn} onClick={handleBrowseStorage}>찾아보기</button>
+            <button style={browseBtn} onClick={handleTestStorage}>확인</button>
           </div>
           {storageOk !== null && (
             <span style={{ fontSize: 11, color: storageOk ? '#22c55e' : '#ef4444' }}>
@@ -275,9 +331,7 @@ export default function Settings() {
               style={{ ...inputStyle, flex: 1 }}
               placeholder="예: E:\SpringToeverOpsBackup"
             />
-            <button style={browseBtn} onClick={handleBrowseBackup}>
-              찾아보기
-            </button>
+            <button style={browseBtn} onClick={handleBrowseBackup}>찾아보기</button>
           </div>
         </FieldRow>
       </SectionCard>
@@ -391,7 +445,6 @@ export default function Settings() {
         </button>
       </SectionCard>
 
-      {/* 복원 모달 */}
       {showRestore && (
         <FirstRunModal onClose={() => setShowRestore(false)} />
       )}
