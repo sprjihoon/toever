@@ -5,7 +5,9 @@ import type {
   BackupHistory, AppRun, OrderStatus, ManualReviewType,
   ArtifactType, RunType, RunStatus, CollectRound, ManualReviewStatus,
   DashboardStats, SearchOrdersParams, OrderDetail,
-  ReportParams, ReportData, ReportPeriod
+  ReportParams, ReportData, ReportPeriod,
+  ReportWidgetConfig, ReportTemplate, ReportBuildParams, WidgetResult, WidgetType,
+  ManualShipment, ManualShipmentCreateParams, ManualShipmentSearchParams,
 } from '../../../shared/types'
 
 // ============================================================
@@ -533,14 +535,14 @@ export function invoiceEventRepo() {
 // 리포트
 // ============================================================
 
-function periodExpr(period: ReportPeriod): string {
+function periodExpr(period: ReportPeriod, col = 'h.order_date'): string {
   switch (period) {
-    case 'day':     return "substr(h.order_date, 1, 10)"
-    case 'week':    return "strftime('%Y-W%W', h.order_date)"
-    case 'month':   return "substr(h.order_date, 1, 7)"
-    case 'quarter': return "substr(h.order_date,1,4)||'-Q'||(((CAST(substr(h.order_date,6,2)AS INTEGER)-1)/3)+1)"
-    case 'half':    return "substr(h.order_date,1,4)||CASE WHEN CAST(substr(h.order_date,6,2)AS INTEGER)<=6 THEN '-H1' ELSE '-H2' END"
-    case 'year':    return "substr(h.order_date, 1, 4)"
+    case 'day':     return `substr(${col}, 1, 10)`
+    case 'week':    return `strftime('%Y-W%W', ${col})`
+    case 'month':   return `substr(${col}, 1, 7)`
+    case 'quarter': return `substr(${col},1,4)||'-Q'||(((CAST(substr(${col},6,2)AS INTEGER)-1)/3)+1)`
+    case 'half':    return `substr(${col},1,4)||CASE WHEN CAST(substr(${col},6,2)AS INTEGER)<=6 THEN '-H1' ELSE '-H2' END`
+    case 'year':    return `substr(${col}, 1, 4)`
   }
 }
 
@@ -548,6 +550,7 @@ export function getReportData(params: ReportParams): ReportData {
   const db = getDb()
   const { date_from, date_to, period } = params
   const pExpr = periodExpr(period)
+  const mPExpr = periodExpr(period, 'ms.manual_date')
 
   // 요약 집계
   const summaryRow = db.prepare(`
@@ -565,8 +568,17 @@ export function getReportData(params: ReportParams): ReportData {
     total_quantity: number; distinct_products: number
   }
 
-  // 기간별 트렌드
-  const trend = db.prepare(`
+  // 수기건 요약
+  const manualSummaryRow = db.prepare(`
+    SELECT
+      COUNT(*)              AS total_manual,
+      COALESCE(SUM(quantity),0) AS total_manual_quantity
+    FROM manual_shipment
+    WHERE substr(manual_date,1,10) BETWEEN ? AND ?
+  `).get(date_from, date_to) as { total_manual: number; total_manual_quantity: number }
+
+  // 기간별 트렌드 (수기건 LEFT JOIN)
+  const trendRaw = db.prepare(`
     SELECT
       ${pExpr}                                                                    AS period_label,
       COUNT(DISTINCT h.id)                                                        AS orders,
@@ -579,6 +591,26 @@ export function getReportData(params: ReportParams): ReportData {
     GROUP BY period_label
     ORDER BY period_label ASC
   `).all(date_from, date_to) as { period_label: string; orders: number; shipped: number; quantity: number }[]
+
+  // 수기건 기간별 집계
+  const manualTrendRaw = db.prepare(`
+    SELECT
+      ${mPExpr}                AS period_label,
+      COUNT(*)                 AS count,
+      COALESCE(SUM(quantity),0) AS quantity
+    FROM manual_shipment ms
+    WHERE substr(ms.manual_date,1,10) BETWEEN ? AND ?
+    GROUP BY period_label
+    ORDER BY period_label ASC
+  `).all(date_from, date_to) as { period_label: string; count: number; quantity: number }[]
+
+  // 트렌드에 수기건 merge
+  const manualMap = new Map(manualTrendRaw.map(r => [r.period_label, r]))
+  const trend = trendRaw.map(r => ({
+    ...r,
+    manual_count:    manualMap.get(r.period_label)?.count    ?? 0,
+    manual_quantity: manualMap.get(r.period_label)?.quantity ?? 0,
+  }))
 
   // 최다 출고 제품 TOP 20
   const top_products = db.prepare(`
@@ -638,10 +670,251 @@ export function getReportData(params: ReportParams): ReportData {
 
   return {
     summary: summaryRow,
+    manual_summary: manualSummaryRow,
     trend,
     top_products,
     by_region,
     by_courier,
     by_status,
+    manual_by_period: manualTrendRaw,
   }
+}
+
+// ============================================================
+// ManualShipment (수기건)
+// ============================================================
+
+export function createManualShipment(data: ManualShipmentCreateParams): ManualShipment {
+  const db = getDb()
+  const result = db.prepare(`
+    INSERT INTO manual_shipment
+      (manual_date, receiver_name, receiver_phone, receiver_address,
+       product_name, option_name, quantity, invoice_no, courier_name,
+       reason, memo, toever_order_no, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    data.manual_date,
+    data.receiver_name,
+    data.receiver_phone ?? null,
+    data.receiver_address ?? null,
+    data.product_name,
+    data.option_name ?? null,
+    data.quantity,
+    data.invoice_no ?? null,
+    data.courier_name ?? null,
+    data.reason ?? null,
+    data.memo ?? null,
+    data.toever_order_no ?? null,
+    data.created_by ?? null,
+  )
+  return db.prepare('SELECT * FROM manual_shipment WHERE id = ?').get(result.lastInsertRowid) as ManualShipment
+}
+
+export function updateManualShipment(id: number, data: Partial<ManualShipmentCreateParams>): void {
+  const db = getDb()
+  const fields: string[] = []
+  const values: unknown[] = []
+
+  const map: Record<string, unknown> = {
+    manual_date: data.manual_date, receiver_name: data.receiver_name,
+    receiver_phone: data.receiver_phone, receiver_address: data.receiver_address,
+    product_name: data.product_name, option_name: data.option_name,
+    quantity: data.quantity, invoice_no: data.invoice_no,
+    courier_name: data.courier_name, reason: data.reason,
+    memo: data.memo, toever_order_no: data.toever_order_no,
+    created_by: data.created_by,
+  }
+
+  for (const [k, v] of Object.entries(map)) {
+    if (v !== undefined) {
+      fields.push(`${k} = ?`)
+      values.push(v ?? null)
+    }
+  }
+  if (fields.length === 0) return
+  fields.push(`updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`)
+  values.push(id)
+  db.prepare(`UPDATE manual_shipment SET ${fields.join(', ')} WHERE id = ?`).run(...values)
+}
+
+export function deleteManualShipment(id: number): void {
+  getDb().prepare('DELETE FROM manual_shipment WHERE id = ?').run(id)
+}
+
+export function getManualShipmentList(params: ManualShipmentSearchParams): {
+  items: ManualShipment[]
+  total: number
+} {
+  const db = getDb()
+  const conditions: string[] = []
+  const args: unknown[] = []
+
+  if (params.keyword) {
+    const kw = `%${params.keyword}%`
+    conditions.push('(receiver_name LIKE ? OR product_name LIKE ? OR invoice_no LIKE ? OR toever_order_no LIKE ?)')
+    args.push(kw, kw, kw, kw)
+  }
+  if (params.date_from) { conditions.push('substr(manual_date,1,10) >= ?'); args.push(params.date_from) }
+  if (params.date_to)   { conditions.push('substr(manual_date,1,10) <= ?'); args.push(params.date_to) }
+  if (params.courier_name) { conditions.push('courier_name = ?'); args.push(params.courier_name) }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+  const total = (db.prepare(`SELECT COUNT(*) as cnt FROM manual_shipment ${where}`).get(...args) as { cnt: number }).cnt
+
+  const pageSize = params.page_size ?? 50
+  const page     = params.page ?? 1
+  const offset   = (page - 1) * pageSize
+
+  const items = db.prepare(
+    `SELECT * FROM manual_shipment ${where} ORDER BY manual_date DESC, id DESC LIMIT ? OFFSET ?`
+  ).all(...args, pageSize, offset) as ManualShipment[]
+
+  return { items, total }
+}
+
+// ============================================================
+// 보고서 템플릿 CRUD
+// ============================================================
+
+type TemplateRow = { id: number; name: string; description: string | null; widgets: string; created_at: string; updated_at: string }
+
+function parseTemplate(row: TemplateRow): ReportTemplate {
+  return { ...row, widgets: JSON.parse(row.widgets) as ReportWidgetConfig[] }
+}
+
+export function getReportTemplates(): ReportTemplate[] {
+  const rows = getDb().prepare('SELECT * FROM report_template ORDER BY updated_at DESC').all() as TemplateRow[]
+  return rows.map(parseTemplate)
+}
+
+export function getReportTemplateById(id: number): ReportTemplate | null {
+  const row = getDb().prepare('SELECT * FROM report_template WHERE id = ?').get(id) as TemplateRow | null
+  return row ? parseTemplate(row) : null
+}
+
+export function saveReportTemplate(
+  name: string,
+  description: string | null,
+  widgets: ReportWidgetConfig[],
+  existingId?: number
+): ReportTemplate {
+  const db = getDb()
+  const json = JSON.stringify(widgets)
+  if (existingId) {
+    db.prepare(`
+      UPDATE report_template
+      SET name=?, description=?, widgets=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE id=?
+    `).run(name, description, json, existingId)
+    return getReportTemplateById(existingId)!
+  }
+  const result = db.prepare(
+    'INSERT INTO report_template (name, description, widgets) VALUES (?,?,?)'
+  ).run(name, description, json)
+  return getReportTemplateById(result.lastInsertRowid as number)!
+}
+
+export function deleteReportTemplate(id: number): void {
+  getDb().prepare('DELETE FROM report_template WHERE id = ?').run(id)
+}
+
+// ============================================================
+// 위젯 데이터 조회
+// ============================================================
+
+function periodExprH(period: ReportPeriod): string {
+  switch (period) {
+    case 'day':     return "substr(h.order_date, 1, 10)"
+    case 'week':    return "strftime('%Y-W%W', h.order_date)"
+    case 'month':   return "substr(h.order_date, 1, 7)"
+    case 'quarter': return "substr(h.order_date,1,4)||'-Q'||(((CAST(substr(h.order_date,6,2)AS INTEGER)-1)/3)+1)"
+    case 'half':    return "substr(h.order_date,1,4)||CASE WHEN CAST(substr(h.order_date,6,2)AS INTEGER)<=6 THEN '-H1' ELSE '-H2' END"
+    case 'year':    return "substr(h.order_date, 1, 4)"
+  }
+}
+
+export function getWidgetData(
+  widget: ReportWidgetConfig,
+  period: ReportPeriod,
+  date_from: string,
+  date_to: string
+): WidgetResult {
+  const db = getDb()
+  const pe = periodExprH(period)
+  try {
+    let data: unknown
+    const g = <T>(sql: string, ...args: unknown[]) =>
+      (db.prepare(sql).get(...args) as T)
+    const a = <T>(sql: string, ...args: unknown[]) =>
+      (db.prepare(sql).all(...args) as T[])
+
+    switch (widget.type as WidgetType) {
+      case 'summary_orders':
+        data = g<{v:number}>(`SELECT COUNT(*) AS v FROM order_header WHERE substr(order_date,1,10) BETWEEN ? AND ? AND status NOT IN ('CANCELLED','DUPLICATE_SKIPPED')`, date_from, date_to).v
+        break
+      case 'summary_shipped':
+        data = g<{v:number}>(`SELECT COUNT(*) AS v FROM order_header WHERE substr(order_date,1,10) BETWEEN ? AND ? AND status NOT IN ('CANCELLED','DUPLICATE_SKIPPED') AND latest_invoice_no IS NOT NULL`, date_from, date_to).v
+        break
+      case 'summary_quantity':
+        data = g<{v:number}>(`SELECT COALESCE(SUM(i.quantity),0) AS v FROM order_item i JOIN order_header h ON h.id=i.order_id WHERE substr(h.order_date,1,10) BETWEEN ? AND ? AND h.status NOT IN ('CANCELLED','DUPLICATE_SKIPPED')`, date_from, date_to).v
+        break
+      case 'summary_unshipped':
+        data = g<{v:number}>(`SELECT COUNT(*) AS v FROM order_header WHERE substr(order_date,1,10) BETWEEN ? AND ? AND status NOT IN ('CANCELLED','DUPLICATE_SKIPPED','TOEVER_INVOICE_UPLOADED','STOREOUT_INSTRUCTED') AND latest_invoice_no IS NULL`, date_from, date_to).v
+        break
+      case 'summary_rate': {
+        const r = g<{total:number;shipped:number}>(`SELECT COUNT(*) AS total, COUNT(CASE WHEN latest_invoice_no IS NOT NULL THEN 1 END) AS shipped FROM order_header WHERE substr(order_date,1,10) BETWEEN ? AND ? AND status NOT IN ('CANCELLED','DUPLICATE_SKIPPED')`, date_from, date_to)
+        data = r.total > 0 ? Math.round((r.shipped / r.total) * 1000) / 10 : 0
+        break
+      }
+      case 'summary_cancelled':
+        data = g<{v:number}>(`SELECT COUNT(*) AS v FROM order_header WHERE substr(order_date,1,10) BETWEEN ? AND ? AND status='CANCELLED'`, date_from, date_to).v
+        break
+      case 'summary_avg_lead_time': {
+        const r = g<{v:number|null}>(`SELECT ROUND(AVG(julianday(latest_invoice_input_at)-julianday(order_date)),1) AS v FROM order_header WHERE substr(order_date,1,10) BETWEEN ? AND ? AND latest_invoice_input_at IS NOT NULL AND status NOT IN ('CANCELLED','DUPLICATE_SKIPPED')`, date_from, date_to)
+        data = r.v ?? 0
+        break
+      }
+      case 'summary_review_open':
+        data = g<{v:number}>(`SELECT COUNT(*) AS v FROM manual_review_queue WHERE status='OPEN'`).v
+        break
+      case 'trend_orders':
+        data = a<{period_label:string;value:number}>(`SELECT ${pe} AS period_label, COUNT(*) AS value FROM order_header h WHERE substr(h.order_date,1,10) BETWEEN ? AND ? AND h.status NOT IN ('CANCELLED','DUPLICATE_SKIPPED') GROUP BY period_label ORDER BY period_label`, date_from, date_to)
+        break
+      case 'trend_shipped':
+        data = a<{period_label:string;value:number}>(`SELECT ${pe} AS period_label, COUNT(*) AS value FROM order_header h WHERE substr(h.order_date,1,10) BETWEEN ? AND ? AND h.status NOT IN ('CANCELLED','DUPLICATE_SKIPPED') AND h.latest_invoice_no IS NOT NULL GROUP BY period_label ORDER BY period_label`, date_from, date_to)
+        break
+      case 'trend_quantity':
+        data = a<{period_label:string;value:number}>(`SELECT ${pe} AS period_label, COALESCE(SUM(i.quantity),0) AS value FROM order_header h LEFT JOIN order_item i ON i.order_id=h.id WHERE substr(h.order_date,1,10) BETWEEN ? AND ? AND h.status NOT IN ('CANCELLED','DUPLICATE_SKIPPED') GROUP BY period_label ORDER BY period_label`, date_from, date_to)
+        break
+      case 'top_products': {
+        const n = widget.config?.top_n ?? 10
+        data = a<{product_name:string;option_name:string|null;quantity:number;order_count:number}>(`SELECT i.product_name, i.option_name, SUM(i.quantity) AS quantity, COUNT(DISTINCT h.id) AS order_count FROM order_item i JOIN order_header h ON h.id=i.order_id WHERE substr(h.order_date,1,10) BETWEEN ? AND ? AND h.status NOT IN ('CANCELLED','DUPLICATE_SKIPPED') GROUP BY i.product_name,i.option_name ORDER BY quantity DESC LIMIT ?`, date_from, date_to, n)
+        break
+      }
+      case 'by_option':
+        data = a<{product_name:string;option_name:string;quantity:number;order_count:number}>(`SELECT i.product_name, COALESCE(i.option_name,'(옵션없음)') AS option_name, SUM(i.quantity) AS quantity, COUNT(DISTINCT h.id) AS order_count FROM order_item i JOIN order_header h ON h.id=i.order_id WHERE substr(h.order_date,1,10) BETWEEN ? AND ? AND h.status NOT IN ('CANCELLED','DUPLICATE_SKIPPED') GROUP BY i.product_name,option_name ORDER BY quantity DESC LIMIT 30`, date_from, date_to)
+        break
+      case 'by_region':
+        data = a<{region:string;orders:number;quantity:number}>(`SELECT CASE WHEN instr(h.receiver_address,' ')>0 THEN substr(h.receiver_address,1,instr(h.receiver_address,' ')-1) ELSE h.receiver_address END AS region, COUNT(DISTINCT h.id) AS orders, COALESCE(SUM(i.quantity),0) AS quantity FROM order_header h LEFT JOIN order_item i ON i.order_id=h.id WHERE substr(h.order_date,1,10) BETWEEN ? AND ? AND h.status NOT IN ('CANCELLED','DUPLICATE_SKIPPED') GROUP BY region ORDER BY orders DESC LIMIT 20`, date_from, date_to)
+        break
+      case 'by_courier':
+        data = a<{courier_name:string;count:number}>(`SELECT COALESCE(latest_courier_name,'미배송') AS courier_name, COUNT(*) AS count FROM order_header WHERE substr(order_date,1,10) BETWEEN ? AND ? AND status NOT IN ('CANCELLED','DUPLICATE_SKIPPED') GROUP BY courier_name ORDER BY count DESC`, date_from, date_to)
+        break
+      case 'by_status':
+        data = a<{status:string;count:number}>(`SELECT status, COUNT(*) AS count FROM order_header WHERE substr(order_date,1,10) BETWEEN ? AND ? GROUP BY status ORDER BY count DESC`, date_from, date_to)
+        break
+      case 'automation_runs':
+        data = a<{run_type:string;total:number;success:number;failed:number;partial:number}>(`SELECT run_type, COUNT(*) AS total, COUNT(CASE WHEN status='SUCCESS' THEN 1 END) AS success, COUNT(CASE WHEN status='FAILED' THEN 1 END) AS failed, COUNT(CASE WHEN status='PARTIAL' THEN 1 END) AS partial FROM app_run WHERE substr(started_at,1,10) BETWEEN ? AND ? GROUP BY run_type ORDER BY total DESC`, date_from, date_to)
+        break
+      default:
+        data = null
+    }
+    return { widget_id: widget.id, type: widget.type, data }
+  } catch (e) {
+    return { widget_id: widget.id, type: widget.type, data: null, error: String(e) }
+  }
+}
+
+export function buildReport(params: ReportBuildParams): WidgetResult[] {
+  return params.widgets.map(w => getWidgetData(w, params.period, params.date_from, params.date_to))
 }

@@ -14,7 +14,7 @@ declare global {
         collect: (params: unknown) => Promise<{ success: boolean; data?: unknown; error?: string }>
       }
       ezadmin: {
-        generateUploadFile: (date: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
+        generateUploadFile: (date: string, round?: 'morning' | 'afternoon' | 'manual') => Promise<{ success: boolean; data?: unknown; error?: string }>
       }
       invoice: {
         importEzadmin: (params: unknown) => Promise<{ success: boolean; data?: unknown; error?: string }>
@@ -56,7 +56,17 @@ declare global {
         onInstallProgress:    (cb: (p: unknown) => void) => () => void
       }
       report: {
-        getData: (params: unknown) => Promise<{ success: boolean; data?: unknown; error?: string }>
+        getData:        (params: unknown) => Promise<{ success: boolean; data?: unknown; error?: string }>
+        getTemplates:   () => Promise<{ success: boolean; data?: unknown; error?: string }>
+        saveTemplate:   (name: string, description: string | null, widgets: unknown[], existingId?: number) => Promise<{ success: boolean; data?: unknown; error?: string }>
+        deleteTemplate: (id: number) => Promise<{ success: boolean; error?: string }>
+        buildReport:    (params: unknown) => Promise<{ success: boolean; data?: unknown; error?: string }>
+      }
+      manual: {
+        create:  (params: unknown)                     => Promise<{ success: boolean; data?: unknown; error?: string }>
+        update:  (id: number, params: unknown)         => Promise<{ success: boolean; error?: string }>
+        delete:  (id: number)                          => Promise<{ success: boolean; error?: string }>
+        getList: (params: unknown)                     => Promise<{ success: boolean; data?: unknown; error?: string }>
       }
       onAutomationEvent: (cb: (event: string, data: unknown) => void) => () => void
     }

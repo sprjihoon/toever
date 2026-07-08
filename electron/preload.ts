@@ -21,7 +21,8 @@ const api = {
 
   // 이지어드민
   ezadmin: {
-    generateUploadFile: (businessDate: string) => ipcRenderer.invoke('ezadmin:generateUploadFile', businessDate),
+    generateUploadFile: (businessDate: string, round?: string) =>
+      ipcRenderer.invoke('ezadmin:generateUploadFile', businessDate, round),
   },
 
   // 송장
@@ -93,7 +94,20 @@ const api = {
 
   // 리포트
   report: {
-    getData: (params: unknown) => ipcRenderer.invoke('report:getData', params),
+    getData:       (params: unknown) => ipcRenderer.invoke('report:getData', params),
+    getTemplates:  () => ipcRenderer.invoke('report:getTemplates'),
+    saveTemplate:  (name: string, description: string | null, widgets: unknown[], existingId?: number) =>
+      ipcRenderer.invoke('report:saveTemplate', name, description, widgets, existingId),
+    deleteTemplate: (id: number) => ipcRenderer.invoke('report:deleteTemplate', id),
+    buildReport:   (params: unknown) => ipcRenderer.invoke('report:buildReport', params),
+  },
+
+  // 수기건
+  manual: {
+    create:  (params: unknown)                     => ipcRenderer.invoke('manual:create', params),
+    update:  (id: number, params: unknown)         => ipcRenderer.invoke('manual:update', id, params),
+    delete:  (id: number)                          => ipcRenderer.invoke('manual:delete', id),
+    getList: (params: unknown)                     => ipcRenderer.invoke('manual:getList', params),
   },
 
   // 자동화 이벤트 구독

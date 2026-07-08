@@ -329,6 +329,59 @@ export interface OrderDetail {
 
 export type ReportPeriod = 'day' | 'week' | 'month' | 'quarter' | 'half' | 'year'
 
+// ── 위젯 타입 ──────────────────────────────────────────────
+export type WidgetType =
+  | 'summary_orders'
+  | 'summary_shipped'
+  | 'summary_quantity'
+  | 'summary_unshipped'
+  | 'summary_rate'
+  | 'summary_cancelled'
+  | 'summary_avg_lead_time'
+  | 'summary_review_open'
+  | 'trend_orders'
+  | 'trend_shipped'
+  | 'trend_quantity'
+  | 'top_products'
+  | 'by_option'
+  | 'by_region'
+  | 'by_courier'
+  | 'by_status'
+  | 'automation_runs'
+
+export type WidgetSize = 'small' | 'medium' | 'large' | 'full'
+
+export interface ReportWidgetConfig {
+  id: string
+  type: WidgetType
+  label: string
+  size: WidgetSize
+  config?: { top_n?: number }
+}
+
+export interface ReportTemplate {
+  id: number
+  name: string
+  description: string | null
+  widgets: ReportWidgetConfig[]
+  created_at: string
+  updated_at: string
+}
+
+export interface ReportBuildParams {
+  period: ReportPeriod
+  date_from: string
+  date_to: string
+  widgets: ReportWidgetConfig[]
+}
+
+export interface WidgetResult {
+  widget_id: string
+  type: WidgetType
+  data: unknown
+  error?: string
+}
+
 export interface ReportParams {
   period: ReportPeriod
   date_from: string   // YYYY-MM-DD
@@ -340,6 +393,8 @@ export interface ReportTrendRow {
   orders: number
   shipped: number
   quantity: number
+  manual_count: number
+  manual_quantity: number
 }
 
 export interface ReportTopProduct {
@@ -365,6 +420,17 @@ export interface ReportStatusRow {
   count: number
 }
 
+export interface ReportManualSummary {
+  total_manual: number
+  total_manual_quantity: number
+}
+
+export interface ReportManualRow {
+  period_label: string
+  count: number
+  quantity: number
+}
+
 export interface ReportData {
   summary: {
     total_orders: number
@@ -372,11 +438,65 @@ export interface ReportData {
     total_quantity: number
     distinct_products: number
   }
+  manual_summary: ReportManualSummary
   trend: ReportTrendRow[]
   top_products: ReportTopProduct[]
   by_region: ReportRegionRow[]
   by_courier: ReportCourierRow[]
   by_status: ReportStatusRow[]
+  manual_by_period: ReportManualRow[]
+}
+
+// ============================================================
+// 수기건 (Manual Shipment)
+// ============================================================
+
+export interface ManualShipment {
+  id: number
+  manual_date: string            // 처리일자 YYYY-MM-DD
+  receiver_name: string          // 수령자명
+  receiver_phone: string | null  // 연락처
+  receiver_address: string | null // 주소
+  product_name: string           // 상품명
+  option_name: string | null     // 옵션
+  quantity: number               // 수량
+  invoice_no: string | null      // 송장번호
+  courier_name: string | null    // 택배사
+  reason: string | null          // 수기처리 사유
+  memo: string | null            // 메모
+  toever_order_no: string | null // 연관 투에버 주문번호
+  created_by: string | null      // 작성자
+  created_at: string
+  updated_at: string
+}
+
+export interface ManualShipmentCreateParams {
+  manual_date: string
+  receiver_name: string
+  receiver_phone?: string
+  receiver_address?: string
+  product_name: string
+  option_name?: string
+  quantity: number
+  invoice_no?: string
+  courier_name?: string
+  reason?: string
+  memo?: string
+  toever_order_no?: string
+  created_by?: string
+}
+
+export interface ManualShipmentUpdateParams extends Partial<ManualShipmentCreateParams> {
+  id: number
+}
+
+export interface ManualShipmentSearchParams {
+  keyword?: string
+  date_from?: string
+  date_to?: string
+  courier_name?: string
+  page?: number
+  page_size?: number
 }
 
 export interface AppSettings {
@@ -384,9 +504,6 @@ export interface AppSettings {
   toever_password: string
   storage_base_path: string
   backup_path: string
-  company_cd: string
-  merchant_cd: string
-  entr_no: string
   scheduler_enabled: boolean
   morning_collect_time: string
   afternoon_collect_time: string

@@ -154,6 +154,15 @@ function createTables(db: Database.Database): void {
       FOREIGN KEY (run_id) REFERENCES app_run(id)
     );
 
+    CREATE TABLE IF NOT EXISTS report_template (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT NOT NULL UNIQUE,
+      description TEXT,
+      widgets     TEXT NOT NULL DEFAULT '[]',
+      created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    );
+
     CREATE TABLE IF NOT EXISTS backup_history (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       backup_type   TEXT NOT NULL DEFAULT 'AUTO',
@@ -166,6 +175,27 @@ function createTables(db: Database.Database): void {
       started_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
       finished_at   TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS manual_shipment (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      manual_date      TEXT NOT NULL,
+      receiver_name    TEXT NOT NULL,
+      receiver_phone   TEXT,
+      receiver_address TEXT,
+      product_name     TEXT NOT NULL,
+      option_name      TEXT,
+      quantity         INTEGER NOT NULL DEFAULT 1,
+      invoice_no       TEXT,
+      courier_name     TEXT,
+      reason           TEXT,
+      memo             TEXT,
+      toever_order_no  TEXT,
+      created_by       TEXT,
+      created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_manual_shipment_date ON manual_shipment(manual_date);
   `)
 }
 
