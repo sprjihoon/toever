@@ -74,12 +74,22 @@ const api = {
       ipcRenderer.invoke('fs:selectFolder', options),
   },
 
+  // 파일 아티팩트
+  artifacts: {
+    getRecent: (limit?: number) => ipcRenderer.invoke('artifacts:getRecent', limit),
+  },
+
   // 앱 제어
   appControl: {
     isFirstRun:          () => ipcRenderer.invoke('app:isFirstRun'),
     markSetupComplete:   () => ipcRenderer.invoke('app:markSetupComplete'),
     relaunch:            () => ipcRenderer.invoke('app:relaunch'),
     getDefaultStoragePath: () => ipcRenderer.invoke('app:getDefaultStoragePath'),
+  },
+
+  // 파일 탐색기에서 열기
+  fsExtra: {
+    showInFolder: (filePath: string) => ipcRenderer.invoke('fs:showInFolder', filePath),
   },
 
   // Playwright Chromium

@@ -289,6 +289,12 @@ export function getOrderItems(order_id: number): OrderItem[] {
 // FileArtifact
 // ============================================================
 
+export function getRecentArtifacts(limit = 30): FileArtifact[] {
+  return getDb().prepare(
+    'SELECT * FROM file_artifact ORDER BY created_at DESC LIMIT ?'
+  ).all(limit) as FileArtifact[]
+}
+
 export function saveFileArtifact(data: Omit<FileArtifact, 'id' | 'created_at'>): FileArtifact {
   const db = getDb()
   const existing = db.prepare('SELECT * FROM file_artifact WHERE sha256 = ?').get(data.sha256) as FileArtifact | null

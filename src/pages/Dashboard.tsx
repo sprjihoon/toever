@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { DashboardStats } from '../../shared/types'
+import type { DashboardStats, FileArtifact } from '../../shared/types'
 import BackupModal from '../components/BackupModal'
 
 interface Props {
@@ -18,6 +18,24 @@ interface AutomationLog {
 // KST(한국 표준시) 기준 오늘 날짜 반환 - UTC toISOString()은 00:00~08:59 KST에서 전날을 반환
 const todayKST = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
 
+const ARTIFACT_LABEL: Record<string, string> = {
+  TOEVER_ORDER_RAW:         '투에버 주문 원본',
+  TOEVER_ORDER_PDF:         '투에버 PDF',
+  EZADMIN_UPLOAD:           '이지어드민 업로드',
+  EZADMIN_INVOICE_RAW:      '이지어드민 송장',
+  TOEVER_INVOICE_UPLOAD:    '투에버 송장 업로드',
+  SCREENSHOT:               '스크린샷',
+}
+
+const ARTIFACT_COLOR: Record<string, { bg: string; fg: string }> = {
+  TOEVER_ORDER_RAW:         { bg: 'rgba(59,130,246,0.15)',  fg: '#93c5fd' },
+  TOEVER_ORDER_PDF:         { bg: 'rgba(59,130,246,0.10)',  fg: '#60a5fa' },
+  EZADMIN_UPLOAD:           { bg: 'rgba(34,197,94,0.15)',   fg: '#86efac' },
+  EZADMIN_INVOICE_RAW:      { bg: 'rgba(6,182,212,0.15)',   fg: '#67e8f9' },
+  TOEVER_INVOICE_UPLOAD:    { bg: 'rgba(168,85,247,0.15)', fg: '#d8b4fe' },
+  SCREENSHOT:               { bg: 'rgba(245,158,11,0.15)', fg: '#fde68a' },
+}
+
 export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
   const [stats, setStats]                   = useState<DashboardStats | null>(null)
   const [loading, setLoading]               = useState(true)
@@ -26,11 +44,20 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
   const [dateFrom, setDateFrom]             = useState(todayKST())
   const [dateTo, setDateTo]                 = useState(todayKST())
   const [round, setRound]                   = useState<CollectRound>('morning')
+  const [ezadminDate, setEzadminDate]       = useState(todayKST())
+  const [artifacts, setArtifacts]           = useState<FileArtifact[]>([])
   const [backupModalOpen, setBackupModalOpen] = useState(false)
 
   const addLog = useCallback((message: string, type: AutomationLog['type'] = 'info') => {
     const time = new Date().toLocaleTimeString('ko-KR')
     setLogs(prev => [{ time, message, type }, ...prev].slice(0, 100))
+  }, [])
+
+  const loadArtifacts = useCallback(async () => {
+    const api = window.toeverApi
+    if (!api?.artifacts) return
+    const r = await api.artifacts.getRecent(20)
+    if (r.success && r.data) setArtifacts(r.data as FileArtifact[])
   }, [])
 
   const loadStats = useCallback(async () => {
@@ -51,6 +78,7 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
 
   useEffect(() => {
     loadStats()
+    loadArtifacts()
     const interval = setInterval(loadStats, 30000)
 
     // 자동화 이벤트 구독
@@ -68,7 +96,7 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
       return () => { clearInterval(interval); unsubscribe() }
     }
     return () => clearInterval(interval)
-  }, [loadStats, addLog])
+  }, [loadStats, loadArtifacts, addLog])
 
   const handleCollect = async () => {
     const api = window.toeverApi
@@ -109,13 +137,14 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
     setRunning('ezadmin')
     // 현재 KST 시간 기준: 12시 이전 = morning, 12시 이후 = afternoon
     const kstHour = new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false })
-    const round: 'morning' | 'afternoon' = Number(kstHour) < 12 ? 'morning' : 'afternoon'
-    addLog(`이지어드민 업로드 파일 생성 시작 (${todayKST()}, ${round})`, 'info')
+    const autoRound: 'morning' | 'afternoon' = Number(kstHour) < 12 ? 'morning' : 'afternoon'
+    addLog(`이지어드민 업로드 파일 생성 시작 (${ezadminDate}, ${autoRound})`, 'info')
     try {
-      const result = await api.ezadmin.generateUploadFile(todayKST(), round)
+      const result = await api.ezadmin.generateUploadFile(ezadminDate, autoRound)
       if (result.success && result.data) {
         const d = result.data as { filePath?: string; rowCount?: number }
-        addLog(`생성 완료: ${d.rowCount}행 → ${d.filePath}`, 'success')
+        addLog(`생성 완료: ${d.rowCount}행 → ${d.filePath ?? ''}`, 'success')
+        loadArtifacts()
       } else {
         addLog(`생성 실패: ${result.error ?? '알 수 없는 오류'}`, 'error')
       }
@@ -123,6 +152,10 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
       setRunning(null)
       loadStats()
     }
+  }
+
+  const handleShowInFolder = async (filePath: string) => {
+    await window.toeverApi?.fsExtra?.showInFolder(filePath)
   }
 
   const handleBackupOpen = () => setBackupModalOpen(true)
@@ -251,8 +284,17 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
           {/* 이지어드민 업로드 파일 생성 */}
           <div style={{ padding: '12px', background: '#0f172a', borderRadius: 8 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', marginBottom: 8 }}>이지어드민 업로드 파일</div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+              <label style={{ fontSize: 11, color: '#64748b', flexShrink: 0 }}>업무일:</label>
+              <input
+                type="date"
+                value={ezadminDate}
+                onChange={e => setEzadminDate(e.target.value)}
+                style={{ flex: 1 }}
+              />
+            </div>
             <div style={{ color: '#64748b', fontSize: 12, marginBottom: 8 }}>
-              신규 출고 대상 {stats?.new_shipment_targets ?? 0}건 → 파일 생성 후 탐색기에서 열림
+              신규 출고 대상 {stats?.new_shipment_targets ?? 0}건 → 생성 후 탐색기에서 열림
             </div>
             <button
               className="btn-success"
@@ -318,6 +360,55 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
           </div>
         </div>
       </div>
+
+      {/* 생성 파일 목록 */}
+      {artifacts.length > 0 && (
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <h2 style={{ fontSize: 14, fontWeight: 600, color: '#f1f5f9' }}>최근 생성 파일</h2>
+            <button
+              className="btn-secondary"
+              style={{ fontSize: 11, padding: '3px 8px' }}
+              onClick={loadArtifacts}
+            >
+              새로고침
+            </button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {artifacts.map(a => (
+              <div key={a.id} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '7px 10px', borderRadius: 6,
+                background: '#0f172a', fontSize: 12,
+              }}>
+                <span style={{
+                  padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, flexShrink: 0,
+                  background: ARTIFACT_COLOR[a.artifact_type]?.bg ?? '#1e293b',
+                  color:      ARTIFACT_COLOR[a.artifact_type]?.fg ?? '#94a3b8',
+                }}>
+                  {ARTIFACT_LABEL[a.artifact_type] ?? a.artifact_type}
+                </span>
+                <span style={{ flex: 1, color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {a.original_filename}
+                </span>
+                <span style={{ color: '#475569', flexShrink: 0, fontSize: 11 }}>
+                  {a.created_at?.slice(0, 10)}
+                </span>
+                <button
+                  onClick={() => handleShowInFolder(a.stored_path)}
+                  style={{
+                    padding: '3px 10px', borderRadius: 4, fontSize: 11, flexShrink: 0,
+                    background: '#1e293b', border: '1px solid #334155',
+                    color: '#93c5fd', cursor: 'pointer',
+                  }}
+                >
+                  탐색기
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 진행 현황 바 */}
       {stats && (

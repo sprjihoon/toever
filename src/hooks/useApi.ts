@@ -45,6 +45,12 @@ declare global {
         storageStatus: ()                                                      => Promise<{ success: boolean; data?: boolean; error?: string }>
         selectFolder:  (options?: { title?: string; defaultPath?: string })    => Promise<{ success: boolean; data?: unknown; error?: string }>
       }
+      fsExtra: {
+        showInFolder: (filePath: string) => Promise<{ success: boolean; error?: string }>
+      }
+      artifacts: {
+        getRecent: (limit?: number) => Promise<{ success: boolean; data?: unknown; error?: string }>
+      }
       appControl: {
         isFirstRun:              () => Promise<{ success: boolean; data?: unknown; error?: string }>
         markSetupComplete?:      () => Promise<{ success: boolean; error?: string }>

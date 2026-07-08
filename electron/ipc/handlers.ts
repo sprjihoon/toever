@@ -7,7 +7,7 @@ import {
   getActiveBatches, cancelEzadminBatch, getAllSettings, setSetting, getSetting,
   getBackupHistoryList, getReportData, getReportTemplates, saveReportTemplate, deleteReportTemplate, buildReport,
   createManualShipment, updateManualShipment, deleteManualShipment, getManualShipmentList,
-  createRun, updateRunStatus,
+  createRun, updateRunStatus, getRecentArtifacts,
 } from '../services/db/repositories'
 import { getDb } from '../services/db/schema'
 import { getKSTDateString } from '../services/storage'
@@ -78,14 +78,14 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       )
 
       if (settings.storage_base_path && !needsRestart) {
-        // 경로가 바뀌지 않은 경우에만 즉시 적용 (디렉터리 보장)
+        // ??? ??? ?? ???? ?? ?? (???? ??)
         setBasePath(settings.storage_base_path)
-        try { ensureAllDirs() } catch { /* 디렉터리 생성 실패는 무시 */ }
+        try { ensureAllDirs() } catch { /* ???? ?? ??? ?? */ }
       }
-      // 경로가 변경됐으면 DB는 재시작 후에 전환 — 즉시 setBasePath 금지
-      // (DB는 여전히 구 경로를 가리키는 상태이므로 split-brain 방지)
+      // ??? ????? DB? ??? ?? ?? ? ?? setBasePath ??
+      // (DB? ??? ? ??? ???? ????? split-brain ??)
 
-      try { restartScheduler() } catch { /* 스케줄러 재시작 실패 무시 */ }
+      try { restartScheduler() } catch { /* ???? ??? ?? ?? */ }
 
       return { success: true, data: { needsRestart } }
     } catch (e) {
@@ -137,13 +137,13 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       const settings = getAllSettings()
       const password = loadPassword()
       if (!settings['toever_id'] || !password) {
-        return { success: false, error: '투에버 ID/비밀번호가 설정되지 않았습니다.' }
+        return { success: false, error: '??? ID/????? ???? ?????.' }
       }
       if (!isStorageAvailable()) {
-        return { success: false, error: '저장소에 접근할 수 없습니다.' }
+        return { success: false, error: '???? ??? ? ????.' }
       }
       if (isLocked(`collect_orders:${params.business_date}:${params.round}`)) {
-        return { success: false, error: '이미 실행 중입니다.' }
+        return { success: false, error: '?? ?? ????.' }
       }
 
       const result = await collectOrders({
@@ -196,7 +196,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         },
       })
       updateRunStatus(run.id, result.success ? 'SUCCESS' : 'FAILED',
-        result.success ? `${result.matched}건 매칭` : result.errors.join('; '))
+        result.success ? `${result.matched}? ??` : result.errors.join('; '))
       return { success: result.success, data: result }
     } catch (e) {
       updateRunStatus(run.id, 'FAILED', String(e))
@@ -207,7 +207,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('invoice:selectFile', async () => {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: '이지어드민 송장 파일 선택',
+        title: '????? ?? ?? ??',
         filters: [
           { name: 'Excel Files', extensions: ['xls', 'xlsx'] },
           { name: 'All Files', extensions: ['*'] },
@@ -215,7 +215,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         properties: ['openFile'],
       })
       if (result.canceled || result.filePaths.length === 0) {
-        return { success: false, error: '파일 선택 취소' }
+        return { success: false, error: '?? ?? ??' }
       }
       return { success: true, data: result.filePaths[0] }
     } catch (e) {
@@ -231,10 +231,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     const settings = getAllSettings()
     const password = loadPassword()
     if (!settings['toever_id'] || !password) {
-      return { success: false, error: '투에버 ID/비밀번호가 설정되지 않았습니다.' }
+      return { success: false, error: '??? ID/????? ???? ?????.' }
     }
     if (isLocked('upload_toever_invoice')) {
-      return { success: false, error: '이미 실행 중입니다.' }
+      return { success: false, error: '?? ?? ????.' }
     }
     const today = getKSTDateString()
     const run = createRun('UPLOAD_TOEVER_INVOICE', today, `upload_invoice:${today}:${Date.now()}`, 'manual')
@@ -248,7 +248,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         },
       })
       updateRunStatus(run.id, result.success ? 'SUCCESS' : 'FAILED',
-        result.success ? `${result.uploaded}건 업로드` : result.errors.join('; '))
+        result.success ? `${result.uploaded}? ???` : result.errors.join('; '))
       return { success: result.success, data: result }
     } catch (e) {
       updateRunStatus(run.id, 'FAILED', String(e))
@@ -365,13 +365,35 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     return { success: true, data: isStorageAvailable() }
   })
 
+  // ??? ????? ?? ??? ??
+  ipcMain.handle('fs:showInFolder', async (_e, filePath: string) => {
+    try {
+      if (fs.existsSync(filePath)) {
+        shell.showItemInFolder(filePath)
+        return { success: true }
+      }
+      return { success: false, error: `??? ????: ${filePath}` }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
+  // ?? ?? ?? ?? (file_artifact)
+  ipcMain.handle('artifacts:getRecent', async (_e, limit = 30) => {
+    try {
+      return { success: true, data: getRecentArtifacts(limit) }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
   ipcMain.handle('fs:openFolder', async (_e, folderPath: string) => {
     try {
       if (fs.existsSync(folderPath)) {
         await shell.openPath(folderPath)
         return { success: true }
       }
-      return { success: false, error: '저장소에 접근할 수 없습니다.' }
+      return { success: false, error: '???? ??? ? ????.' }
     } catch (e) {
       return { success: false, error: String(e) }
     }
@@ -380,7 +402,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('fs:selectFolder', async (_e, options?: { title?: string; defaultPath?: string }) => {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: options?.title ?? '폴더 선택',
+        title: options?.title ?? '?? ??',
         defaultPath: options?.defaultPath,
         properties: ['openDirectory'],
       })
@@ -400,9 +422,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('backup:selectRestoreFolder', async () => {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: '백업 폴더 선택',
+        title: '?? ?? ??',
         properties: ['openDirectory'],
-        buttonLabel: '이 폴더로 복원',
+        buttonLabel: '? ??? ??',
       })
       if (result.canceled || result.filePaths.length === 0) {
         return { success: false, error: '???' }
@@ -440,7 +462,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     return { success: true }
   })
 
-  // 최초 실행 여부: setup_completed 설정으로 판단 (주문 0건 기준은 재시작마다 모달 재표시 버그 유발)
+  // ?? ?? ??: setup_completed ???? ?? (?? 0? ??? ????? ?? ??? ?? ??)
   ipcMain.handle('app:isFirstRun', async () => {
     try {
       const setupDone = getSetting('setup_completed') === 'true'
@@ -450,7 +472,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     }
   })
 
-  // 최초 설정 완료 표시
+  // ?? ?? ?? ??
   ipcMain.handle('app:markSetupComplete', async () => {
     try {
       setSetting('setup_completed', 'true')
