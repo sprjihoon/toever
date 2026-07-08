@@ -15,7 +15,7 @@ import path from 'path'
 import { getDb } from './db/schema'
 import { getAllSettings, saveBackupHistory } from './db/repositories'
 import { getBasePath, DIRS } from './storage'
-import { isLocked } from './toever/orchestrator'
+import { isAnyLocked } from './toever/orchestrator'
 import type { BackupProgress, BackupResult, RunningAutomation } from '../../shared/types'
 
 // 단일 실행 락
@@ -26,16 +26,17 @@ let backupRunning = false
  */
 export function getRunningAutomations(): RunningAutomation[] {
   const result: RunningAutomation[] = []
+  // isAnyLocked: prefix로 시작하는 락이 있으면 true (exact match 아님)
   const checks: [string, string][] = [
     ['collect_orders:', '주문 수집'],
     ['export_ezadmin:', '이지어드민 업로드 파일 생성'],
     ['import_invoice',  '이지어드민 송장 import'],
     ['upload_toever_invoice', '투에버 송장 업로드'],
-    ['backup', '백업'],
   ]
-  for (const [key, label] of checks) {
-    if (isLocked(key)) result.push({ key, label })
+  for (const [prefix, label] of checks) {
+    if (isAnyLocked(prefix)) result.push({ key: prefix, label })
   }
+  if (backupRunning) result.push({ key: 'backup', label: '백업' })
   return result
 }
 

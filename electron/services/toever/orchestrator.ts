@@ -39,6 +39,14 @@ export function isLocked(key: string): boolean {
   return runningLocks.has(key)
 }
 
+/** prefix로 시작하는 락이 하나라도 걸려 있으면 true */
+export function isAnyLocked(prefix: string): boolean {
+  for (const k of runningLocks) {
+    if (k.startsWith(prefix)) return true
+  }
+  return false
+}
+
 // ============================================================
 // 주문 수집
 // ============================================================

@@ -209,12 +209,16 @@ export function getOrderDetail(id: number): OrderDetail | null {
 
   const items = db.prepare('SELECT * FROM order_item WHERE order_id = ? ORDER BY line_no').all(id) as OrderItem[]
   const invoiceEvents = db.prepare('SELECT * FROM invoice_event WHERE order_id = ? ORDER BY created_at DESC').all(id) as InvoiceEvent[]
-  const artifacts = db.prepare(`
-    SELECT fa.* FROM file_artifact fa
-    INNER JOIN toever_action_log tal ON tal.run_id = fa.run_id
-    WHERE fa.artifact_type IN ('TOEVER_ORDER_RAW','TOEVER_ORDER_PDF','TOEVER_INVOICE_UPLOAD','SCREENSHOT')
-    LIMIT 20
-  `).all() as FileArtifact[]
+  // 해당 주문의 source_run_id로만 artifact 필터 (전체 조회 금지)
+  const artifacts = header.source_run_id
+    ? db.prepare(`
+        SELECT * FROM file_artifact
+        WHERE run_id = ?
+          AND artifact_type IN ('TOEVER_ORDER_RAW','TOEVER_ORDER_PDF','TOEVER_INVOICE_UPLOAD','SCREENSHOT')
+        ORDER BY created_at DESC
+        LIMIT 20
+      `).all(header.source_run_id) as FileArtifact[]
+    : []
   const manualReviews = db.prepare(
     'SELECT * FROM manual_review_queue WHERE toever_order_no = ? ORDER BY detected_at DESC'
   ).all(header.toever_order_no) as ManualReviewItem[]

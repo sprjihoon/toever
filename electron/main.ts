@@ -1,8 +1,8 @@
 import { app, BrowserWindow } from 'electron'
 import path from 'path'
+import fs from 'fs'
 import { initDb } from './services/db/schema'
-import { getAllSettings, setSetting } from './services/db/repositories'
-import { setBasePath, ensureAllDirs, getBasePath } from './services/storage'
+import { setBasePath, ensureAllDirs } from './services/storage'
 import { registerIpcHandlers } from './ipc/handlers'
 import { startScheduler, setMainWindow } from './services/scheduler'
 
@@ -44,22 +44,36 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  // DB 초기화
-  const storagePath = 'D:\\SpringToeverOps'
-  setBasePath(storagePath)
+  // 스토리지 경로 결정:
+  // 우선순위: (1) 이전에 저장된 설정 → (2) D:\SpringToeverOps → (3) AppData fallback
+  const DEFAULT_PATH  = 'D:\\SpringToeverOps'
+  const FALLBACK_PATH = path.join(app.getPath('userData'), 'SpringToeverOps')
 
+  let storagePath = DEFAULT_PATH
+  try {
+    fs.mkdirSync(storagePath, { recursive: true })
+  } catch {
+    // D: 드라이브가 없으면 AppData 경로로 전환
+    storagePath = FALLBACK_PATH
+    console.warn(`[main] 기본 저장소 경로(D:) 접근 불가 → fallback: ${storagePath}`)
+  }
+
+  setBasePath(storagePath)
   const db = initDb(storagePath)
 
-  // 설정에서 저장소 경로 읽기
-  const savedPath = db.prepare("SELECT value FROM app_settings WHERE key = 'storage_base_path'").get() as { value: string } | undefined
-  if (savedPath?.value) {
-    setBasePath(savedPath.value)
+  // DB에 이전에 저장한 사용자 지정 경로가 있으면 적용
+  const savedPathRow = db
+    .prepare("SELECT value FROM app_settings WHERE key = 'storage_base_path'")
+    .get() as { value: string } | undefined
+
+  if (savedPathRow?.value && savedPathRow.value !== storagePath) {
+    setBasePath(savedPathRow.value)
+    storagePath = savedPathRow.value
   }
 
   try {
     ensureAllDirs()
   } catch {
-    // 저장소 없으면 경고만 - 업무 중단 안 함
     console.warn('[main] 저장소 디렉토리 생성 실패 - 설정에서 경로를 변경하세요.')
   }
 

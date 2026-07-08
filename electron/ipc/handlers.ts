@@ -1,6 +1,5 @@
 import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import fs from 'fs'
-import path from 'path'
 import {
   getDashboardStats, searchOrders, getOrderDetail,
   getOpenManualReviews, getManualReviews, updateManualReviewStatus,
@@ -14,10 +13,10 @@ import {
 } from '../services/toever/orchestrator'
 import {
   runBackup, getRunningAutomations, isBackupPathAvailable,
-  getLastBackup, getBackupHistory,
+  getLastBackup,
 } from '../services/backup'
-import { savePassword, loadPassword, hasPasswordStored } from '../services/credential'
-import { ensureAllDirs, isStorageAvailable, setBasePath, getBasePath } from '../services/storage'
+import { savePassword, loadPassword } from '../services/credential'
+import { ensureAllDirs, isStorageAvailable, setBasePath } from '../services/storage'
 import type {
   SearchOrdersParams, AppSettings,
   CollectOrdersParams, ImportInvoiceParams,
@@ -26,7 +25,7 @@ import type {
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ============================================================
-  // ???
+  // ??
   // ============================================================
 
   ipcMain.handle('settings:getAll', async () => {
@@ -36,7 +35,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         success: true,
         data: {
           toever_id:              all['toever_id'] ?? '',
-          toever_password:        loadPassword(),       // ????? ??
+          toever_password:        loadPassword(),
           storage_base_path:      all['storage_base_path'] ?? 'D:\\SpringToeverOps',
           backup_path:            all['backup_path'] ?? 'E:\\SpringToeverOpsBackup',
           company_cd:             all['company_cd'] ?? '01',
@@ -57,7 +56,6 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     try {
       for (const [key, value] of Object.entries(settings)) {
         if (key === 'toever_password') {
-          // ????? ????? ??
           savePassword(String(value))
         } else {
           setSetting(key, String(value))
@@ -65,7 +63,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       }
       if (settings.storage_base_path) {
         setBasePath(settings.storage_base_path)
-        ensureAllDirs()
+        try { ensureAllDirs() } catch { /* ?? ??? ?? */ }
       }
       return { success: true }
     } catch (e) {
@@ -74,7 +72,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ???????
+  // ????
   // ============================================================
 
   ipcMain.handle('dashboard:getStats', async (_e, today: string) => {
@@ -109,7 +107,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ?? ???
+  // ?? ?? ???
   // ============================================================
 
   ipcMain.handle('orders:collect', async (_e, params: CollectOrdersParams) => {
@@ -141,14 +139,13 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ????????????????? ???
+  // ????? ??? ?? ??
   // ============================================================
 
   ipcMain.handle('ezadmin:generateUploadFile', async (_e, business_date: string) => {
     try {
       const result = generateEzadminUploadFile(business_date)
       if (result.success && result.filePath) {
-        // ??? ?????????? ???
         shell.showItemInFolder(result.filePath)
       }
       return { success: result.success, data: result, error: result.error }
@@ -158,7 +155,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ???????????? import
+  // ????? ?? import
   // ============================================================
 
   ipcMain.handle('invoice:importEzadmin', async (_e, params: ImportInvoiceParams) => {
@@ -178,7 +175,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('invoice:selectFile', async () => {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: '???????????? ??? ???',
+        title: '????? ?? ?? ??',
         filters: [
           { name: 'Excel Files', extensions: ['xls', 'xlsx'] },
           { name: 'All Files', extensions: ['*'] },
@@ -186,7 +183,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         properties: ['openFile'],
       })
       if (result.canceled || result.filePaths.length === 0) {
-        return { success: false, error: '??? ??? ??' }
+        return { success: false, error: '?? ?? ??' }
       }
       return { success: true, data: result.filePaths[0] }
     } catch (e) {
@@ -195,7 +192,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ???????? ?????
+  // ??? ?? ???
   // ============================================================
 
   ipcMain.handle('invoice:uploadToever', async () => {
@@ -223,13 +220,12 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ?? ???
+  // ?? ??
   // ============================================================
 
   ipcMain.handle('batch:getActive', async () => {
     try {
-      const batches = getActiveBatches()
-      return { success: true, data: batches }
+      return { success: true, data: getActiveBatches() }
     } catch (e) {
       return { success: false, error: String(e) }
     }
@@ -245,7 +241,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ????????
+  // ????
   // ============================================================
 
   ipcMain.handle('review:getOpen', async () => {
@@ -325,7 +321,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ??? ?????
+  // ?? ???
   // ============================================================
 
   ipcMain.handle('fs:openFolder', async (_e, folderPath: string) => {
@@ -334,7 +330,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         shell.openPath(folderPath)
         return { success: true }
       }
-      return { success: false, error: '???? ?????? ??????.' }
+      return { success: false, error: '?? ??? ???? ????.' }
     } catch (e) {
       return { success: false, error: String(e) }
     }
