@@ -45,7 +45,12 @@ export function getRunningAutomations(): RunningAutomation[] {
  */
 export function isBackupPathAvailable(backupPath: string): boolean {
   try {
-    return fs.existsSync(backupPath)
+    if (!fs.existsSync(backupPath)) return false
+    // 쓰기 가능 여부 확인 (읽기 전용 드라이브 대비)
+    const testFile = path.join(backupPath, '.write_test_' + Date.now())
+    fs.writeFileSync(testFile, '')
+    fs.unlinkSync(testFile)
+    return true
   } catch {
     return false
   }
@@ -106,12 +111,10 @@ export async function runBackup(options: BackupOptions): Promise<BackupResult> {
       return result
     }
 
-    // 날짜 폴더 생성
-    const now = new Date()
-    const yyyy = String(now.getFullYear())
-    const mm   = String(now.getMonth() + 1).padStart(2, '0')
-    const dd   = String(now.getDate()).padStart(2, '0')
-    const ts   = now.toISOString().replace(/[-:T.Z]/g, '').slice(0, 17)
+    // 날짜 폴더 생성 (KST 기준)
+    const kstDate = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
+    const [yyyy, mm, dd] = kstDate.split('-')
+    const ts   = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 17)
     const destPath = path.join(destBase, yyyy, mm, dd, ts)
 
     if (!fs.existsSync(destPath)) fs.mkdirSync(destPath, { recursive: true })

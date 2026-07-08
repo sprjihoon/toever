@@ -17,7 +17,7 @@ import fs from 'fs'
 import { DIRS, buildDatePrefix, sha256OfBuffer } from '../storage'
 import { getDb } from '../db/schema'
 import { saveFileArtifact, createEzadminBatch, updateOrderStatus } from '../db/repositories'
-import type { OrderHeader, OrderItem } from '../../../shared/types'
+import type { OrderHeader, OrderItem, CollectRound } from '../../../shared/types'
 
 interface EzadminRow {
   주문번호:   string
@@ -37,7 +37,8 @@ const SHEET_NAME = 'Ordering_data'
 export function buildEzadminUploadFile(
   orders: { header: OrderHeader; items: OrderItem[] }[],
   businessDate: string,
-  run_id?: number
+  run_id?: number,
+  round?: CollectRound
 ): { filePath: string; batchId: number; rowCount: number } {
   if (orders.length === 0) throw new Error('출고 대상 주문이 없습니다.')
 
@@ -73,13 +74,19 @@ export function buildEzadminUploadFile(
 
   XLSX.utils.book_append_sheet(wb, ws, SHEET_NAME)
 
-  // 파일 저장
   const dir = DIRS.generatedEzadminUpload()
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
 
   const datePrefix = buildDatePrefix(businessDate)
-  const ts = Date.now()
-  const filename = `${datePrefix}_ezadmin_upload_${ts}.xlsx`
+  const roundLabel = round ?? 'manual'
+
+  // 같은 날짜 + round로 기존 파일 수를 세어 순번 결정 (1차, 2차, ...)
+  const existing = fs.existsSync(dir)
+    ? fs.readdirSync(dir).filter(f => f.startsWith(`${datePrefix}_ezadmin_upload_${roundLabel}_`))
+    : []
+  const seq = existing.length + 1
+
+  const filename = `${datePrefix}_ezadmin_upload_${roundLabel}_${seq}차.xlsx`
   const filePath = path.join(dir, filename)
 
   const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' }) as Buffer
@@ -101,7 +108,9 @@ export function buildEzadminUploadFile(
     // order_count는 고유 주문건수(헤더 수), row_count는 상품 라인 수
     const batch = createEzadminBatch(orders.length, artifact.id)
     for (const { header } of orders) {
-      updateOrderStatus(header.id, 'EXPORTED_TO_EZADMIN')
+      // status 변경과 동시에 ezadmin_batch_id 연결 (배치 취소 추적에 필수)
+      db.prepare('UPDATE order_header SET status = ?, ezadmin_batch_id = ? WHERE id = ?')
+        .run('EXPORTED_TO_EZADMIN', batch.id, header.id)
     }
     return { batchId: batch.id }
   })()

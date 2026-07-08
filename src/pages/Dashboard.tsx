@@ -107,9 +107,12 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
     const api = window.toeverApi
     if (!api) return
     setRunning('ezadmin')
-    addLog(`이지어드민 업로드 파일 생성 시작 (${todayKST()})`, 'info')
+    // 현재 KST 시간 기준: 12시 이전 = morning, 12시 이후 = afternoon
+    const kstHour = new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false })
+    const round: 'morning' | 'afternoon' = Number(kstHour) < 12 ? 'morning' : 'afternoon'
+    addLog(`이지어드민 업로드 파일 생성 시작 (${todayKST()}, ${round})`, 'info')
     try {
-      const result = await api.ezadmin.generateUploadFile(todayKST())
+      const result = await api.ezadmin.generateUploadFile(todayKST(), round)
       if (result.success && result.data) {
         const d = result.data as { filePath?: string; rowCount?: number }
         addLog(`생성 완료: ${d.rowCount}행 → ${d.filePath}`, 'success')

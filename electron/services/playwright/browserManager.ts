@@ -70,12 +70,15 @@ export async function installChromium(
     const playwrightBin = resolvePlaywrightCli()
 
     await new Promise<void>((resolve, reject) => {
+      // 패키징 환경에서 process.execPath는 electron.exe이므로
+      // ELECTRON_RUN_AS_NODE=1 플래그로 Node 모드로 실행
       const child = spawn(
-        process.execPath,  // node
+        process.execPath,
         [playwrightBin, 'install', 'chromium'],
         {
           env: {
             ...process.env,
+            ELECTRON_RUN_AS_NODE: '1',
             PLAYWRIGHT_BROWSERS_PATH: getBrowsersPath(),
           },
           windowsHide: true,

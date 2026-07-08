@@ -1,7 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import type { ManualReviewItem } from '../../shared/types'
 
 type StatusFilter = 'ALL' | 'OPEN' | 'ACK' | 'RESOLVED' | 'DISMISSED'
+
+interface Props {
+  onBadgeUpdate?: (count: number) => void
+}
 
 const STATUS_LABELS: Record<string, string> = {
   OPEN:      '미처리',
@@ -27,35 +31,38 @@ const REVIEW_TYPE_LABELS: Record<string, string> = {
   UPLOAD_PARTIAL_FAIL: '업로드 부분 실패',
   TOKEN_MISSING:       '토큰 누락',
   STOREOUT_UNCLEAR:    '출고 불명확',
-  SCIENTIFIC_NOTATION: '과학적표기법',
+  SCIENTIFIC_NOTATION: '과학적 표기법',
   UNKNOWN:             '알 수 없음',
 }
 
-export default function ManualReview() {
+export default function ManualReview({ onBadgeUpdate }: Props) {
   const [items, setItems]       = useState<ManualReviewItem[]>([])
   const [filter, setFilter]     = useState<StatusFilter>('OPEN')
   const [selected, setSelected] = useState<ManualReviewItem | null>(null)
   const [loading, setLoading]   = useState(false)
   const [updating, setUpdating] = useState(false)
 
-  const loadItems = async (f: StatusFilter = filter) => {
+  const loadItems = useCallback(async (f: StatusFilter = filter) => {
     const api = window.toeverApi
     if (!api) return
     setLoading(true)
     try {
-      const result = f === 'OPEN'
-        ? await api.review.getOpen()
-        : await api.review.getAll(200, 0)
+      // OPEN 필터는 전용 API(미처리만), 나머지는 전체 로드 후 클라이언트 필터
+      const result = await api.review.getAll(500, 0)
       if (result.success && result.data) {
         const all = result.data as ManualReviewItem[]
-        setItems(f === 'ALL' ? all : all.filter(i => i.status === f))
+        const filtered = f === 'ALL' ? all : all.filter(i => i.status === f)
+        setItems(filtered)
+        // 미처리 건수로 사이드바 배지 갱신
+        const openCount = all.filter(i => i.status === 'OPEN').length
+        onBadgeUpdate?.(openCount)
       }
     } finally {
       setLoading(false)
     }
-  }
+  }, [filter, onBadgeUpdate])
 
-  useEffect(() => { loadItems() }, [filter])
+  useEffect(() => { loadItems(filter) }, [filter])
 
   const handleStatusUpdate = async (id: number, status: string) => {
     const api = window.toeverApi
@@ -63,10 +70,8 @@ export default function ManualReview() {
     setUpdating(true)
     try {
       await api.review.updateStatus(id, status)
-      await loadItems()
-      if (selected?.id === id) {
-        setSelected(prev => prev ? { ...prev, status: status as ManualReviewItem['status'] } : null)
-      }
+      await loadItems(filter)
+      setSelected(prev => prev?.id === id ? { ...prev, status: status as ManualReviewItem['status'] } : prev)
     } finally {
       setUpdating(false)
     }
@@ -86,14 +91,11 @@ export default function ManualReview() {
                 key={f}
                 onClick={() => setFilter(f)}
                 style={{
-                  padding: '4px 10px',
-                  borderRadius: 6,
-                  fontSize: 12,
+                  padding: '4px 10px', borderRadius: 6, fontSize: 12,
                   background: filter === f ? '#3b82f6' : 'transparent',
                   color: filter === f ? 'white' : '#64748b',
                   border: `1px solid ${filter === f ? '#3b82f6' : '#334155'}`,
                   cursor: 'pointer',
-                  transition: 'all 0.15s',
                 }}
               >
                 {f === 'ALL' ? '전체' : STATUS_LABELS[f]}
@@ -114,19 +116,16 @@ export default function ManualReview() {
                 key={item.id}
                 onClick={() => setSelected(item)}
                 style={{
-                  padding: '12px 20px',
-                  borderBottom: '1px solid #1e293b',
+                  padding: '12px 20px', borderBottom: '1px solid #1e293b',
                   cursor: 'pointer',
                   background: selected?.id === item.id ? 'rgba(59,130,246,0.08)' : 'transparent',
-                  transition: 'background 0.1s',
                 }}
                 onMouseEnter={e => { if (selected?.id !== item.id) (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.02)' }}
                 onMouseLeave={e => { if (selected?.id !== item.id) (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                   <span style={{
-                    fontSize: 11, fontWeight: 600, padding: '2px 6px',
-                    borderRadius: 4,
+                    fontSize: 11, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
                     background: `${STATUS_COLORS[item.status] ?? '#475569'}22`,
                     color: STATUS_COLORS[item.status] ?? '#94a3b8',
                   }}>
@@ -223,16 +222,12 @@ export default function ManualReview() {
                     onClick={() => handleStatusUpdate(selected.id, s)}
                     disabled={updating || selected.status === s}
                     style={{
-                      padding: '6px 14px',
-                      borderRadius: 6,
-                      fontSize: 12,
-                      fontWeight: 500,
+                      padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 500,
                       background: selected.status === s ? `${STATUS_COLORS[s]}22` : 'transparent',
                       color: STATUS_COLORS[s],
                       border: `1px solid ${STATUS_COLORS[s]}44`,
                       cursor: selected.status === s ? 'default' : 'pointer',
                       opacity: updating ? 0.6 : 1,
-                      transition: 'all 0.15s',
                     }}
                   >
                     {STATUS_LABELS[s]}
@@ -241,7 +236,7 @@ export default function ManualReview() {
               </div>
             </div>
 
-            {/* 감지 시간 */}
+            {/* 감지 시각 */}
             {selected.detected_at && (
               <div style={{ fontSize: 11, color: '#475569' }}>
                 감지: {new Date(selected.detected_at).toLocaleString('ko-KR')}

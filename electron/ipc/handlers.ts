@@ -68,6 +68,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
           setSetting(key, String(value))
         }
       }
+      const prevStoragePath = getBasePath()
       if (settings.storage_base_path) {
         setBasePath(settings.storage_base_path)
         try { ensureAllDirs() } catch { /* ?? ?? ? ?? ?? ?? */ }
@@ -79,7 +80,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       // getBasePath() = current DB path; restart needed if new path differs
       const needsRestart = Boolean(
         settings.storage_base_path &&
-        settings.storage_base_path !== getBasePath()
+        settings.storage_base_path !== prevStoragePath
       )
       return { success: true, data: { needsRestart } }
     } catch (e) {
@@ -426,8 +427,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ? ?? ?? (DB? ???? ??? true)
   ipcMain.handle('app:isFirstRun', async () => {
     try {
-      const stats = getDashboardStats(new Date().toISOString().slice(0, 10))
-      return { success: true, data: stats.total_collected === 0 }
+      const { getDb } = require('../services/db/schema')
+      const row = getDb().prepare('SELECT COUNT(*) as cnt FROM order_header').get() as { cnt: number }
+      return { success: true, data: row.cnt === 0 }
     } catch {
       return { success: true, data: true }
     }

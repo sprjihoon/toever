@@ -187,6 +187,14 @@ export function searchOrders(params: SearchOrdersParams): { orders: OrderHeader[
     conditions.push("latest_invoice_no LIKE ?")
     args.push(`%${params.invoice_no}%`)
   }
+  if (params.product_name) {
+    conditions.push("id IN (SELECT order_id FROM order_item WHERE product_name LIKE ?)")
+    args.push(`%${params.product_name}%`)
+  }
+  if (params.option_name) {
+    conditions.push("id IN (SELECT order_id FROM order_item WHERE option_name LIKE ?)")
+    args.push(`%${params.option_name}%`)
+  }
   if (params.status) {
     conditions.push("status = ?")
     args.push(params.status)
@@ -296,11 +304,21 @@ export function createEzadminBatch(order_count: number, file_id?: number): Ezadm
 }
 
 export function cancelEzadminBatch(id: number, reason: string): void {
-  getDb().prepare(`
-    UPDATE ezadmin_export_batch
-    SET status = 'CANCELLED', cancelled_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), cancelled_reason = ?
-    WHERE id = ?
-  `).run(reason, id)
+  const db = getDb()
+  // 배치 취소 + 연결된 주문 상태 복원을 원자적으로 처리
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE ezadmin_export_batch
+      SET status = 'CANCELLED', cancelled_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), cancelled_reason = ?
+      WHERE id = ?
+    `).run(reason, id)
+    // 해당 배치에 속한 주문을 EZADMIN_BATCH_CANCELLED로 변경 (재출고 대상으로 처리 가능)
+    db.prepare(`
+      UPDATE order_header
+      SET status = 'EZADMIN_BATCH_CANCELLED'
+      WHERE ezadmin_batch_id = ? AND status = 'EXPORTED_TO_EZADMIN'
+    `).run(id)
+  })()
 }
 
 export function getActiveBatches(): EzadminExportBatch[] {
@@ -779,7 +797,13 @@ export function getManualShipmentList(params: ManualShipmentSearchParams): {
 type TemplateRow = { id: number; name: string; description: string | null; widgets: string; created_at: string; updated_at: string }
 
 function parseTemplate(row: TemplateRow): ReportTemplate {
-  return { ...row, widgets: JSON.parse(row.widgets) as ReportWidgetConfig[] }
+  let widgets: ReportWidgetConfig[] = []
+  try {
+    widgets = JSON.parse(row.widgets) as ReportWidgetConfig[]
+  } catch {
+    widgets = []
+  }
+  return { ...row, widgets }
 }
 
 export function getReportTemplates(): ReportTemplate[] {

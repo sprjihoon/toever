@@ -296,7 +296,8 @@ export async function collectOrders(params: {
 
 export function generateEzadminUploadFile(
   business_date: string,
-  run_id?: number
+  run_id?: number,
+  round?: CollectRound
 ): { success: boolean; filePath?: string; rowCount?: number; error?: string } {
   const lockKey = `export_ezadmin:${business_date}`
   if (!acquireLock(lockKey)) {
@@ -314,7 +315,7 @@ export function generateEzadminUploadFile(
       items: getOrderItems(h.id),
     }))
 
-    const result = buildEzadminUploadFile(ordersWithItems, business_date, run_id)
+    const result = buildEzadminUploadFile(ordersWithItems, business_date, run_id, round)
     return { success: true, filePath: result.filePath, rowCount: result.rowCount }
   } catch (e) {
     return { success: false, error: String(e) }
@@ -345,16 +346,21 @@ export async function importEzadminInvoice(params: {
   }
 
   try {
+    if (!fs.existsSync(params.filePath)) {
+      return { success: false, matched: 0, multi_invoice: 0, orphan: 0, warnings: [], errors: [`파일을 찾을 수 없습니다: ${params.filePath}`] }
+    }
     const { rows, fileHash, warnings, errors } = parseEzadminInvoiceFile(params.filePath)
 
     if (errors.length > 0) {
-      addManualReview({
-        review_type: 'HEADER_MISMATCH',
-        severity: 'HIGH',
-        run_id: params.run_id,
-        error_message: errors.join('\n'),
-        recommended_action: '이지어드민 송장 파일 포맷 확인',
-      })
+      if (true) {
+        addManualReview({
+          review_type: 'HEADER_MISMATCH',
+          severity: 'HIGH',
+          run_id: params.run_id,
+          error_message: errors.join('\n'),
+          recommended_action: '이지어드민 송장 파일 포맷 확인',
+        })
+      }
       return { success: false, matched: 0, multi_invoice: 0, orphan: 0, warnings, errors }
     }
 

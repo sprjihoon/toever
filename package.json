@@ -2,7 +2,7 @@
   "name": "spring-toever-ops",
   "version": "1.0.0",
   "description": "투에버-이지어드민 주문·송장 자동화 운영 프로그램",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/electron/main.js",
   "scripts": {
     "dev": "concurrently -k -n VITE,ELECTRON -c blue,green \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite",
@@ -16,7 +16,7 @@
     "install:playwright": "npx playwright install chromium --with-deps"
   },
   "keywords": [],
-  "author": "",
+  "author": "Spring Toever Ops",
   "license": "MIT",
   "devDependencies": {
     "@electron/rebuild": "^3.7.2",

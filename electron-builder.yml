@@ -14,11 +14,10 @@ win:
   artifactName: Spring-Toever-Ops-Setup-${version}.exe
 
 nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true
+  oneClick: true
+  perMachine: false
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  menuCategory: true
   shortcutName: Spring Toever Ops
 
 # 패키지에 포함할 파일
