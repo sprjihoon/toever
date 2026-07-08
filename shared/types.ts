@@ -323,6 +323,62 @@ export interface OrderDetail {
   manualReviews: ManualReviewItem[]
 }
 
+// ============================================================
+// 리포트
+// ============================================================
+
+export type ReportPeriod = 'day' | 'week' | 'month' | 'quarter' | 'half' | 'year'
+
+export interface ReportParams {
+  period: ReportPeriod
+  date_from: string   // YYYY-MM-DD
+  date_to: string     // YYYY-MM-DD
+}
+
+export interface ReportTrendRow {
+  period_label: string
+  orders: number
+  shipped: number
+  quantity: number
+}
+
+export interface ReportTopProduct {
+  product_name: string
+  option_name: string | null
+  quantity: number
+  order_count: number
+}
+
+export interface ReportRegionRow {
+  region: string
+  orders: number
+  quantity: number
+}
+
+export interface ReportCourierRow {
+  courier_name: string
+  count: number
+}
+
+export interface ReportStatusRow {
+  status: string
+  count: number
+}
+
+export interface ReportData {
+  summary: {
+    total_orders: number
+    total_shipped: number
+    total_quantity: number
+    distinct_products: number
+  }
+  trend: ReportTrendRow[]
+  top_products: ReportTopProduct[]
+  by_region: ReportRegionRow[]
+  by_courier: ReportCourierRow[]
+  by_status: ReportStatusRow[]
+}
+
 export interface AppSettings {
   toever_id: string
   toever_password: string

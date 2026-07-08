@@ -5,7 +5,7 @@ import {
   getDashboardStats, searchOrders, getOrderDetail,
   getOpenManualReviews, getManualReviews, updateManualReviewStatus,
   getActiveBatches, cancelEzadminBatch, getAllSettings, setSetting,
-  getBackupHistoryList,
+  getBackupHistoryList, getReportData,
 } from '../services/db/repositories'
 import {
   collectOrders, generateEzadminUploadFile,
@@ -24,7 +24,7 @@ import { restartScheduler } from '../services/scheduler'
 import type {
   SearchOrdersParams, AppSettings,
   CollectOrdersParams, ImportInvoiceParams,
-  IpcResult, ManualReviewStatus,
+  IpcResult, ManualReviewStatus, ReportParams,
 } from '../../shared/types'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
@@ -455,3 +455,15 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     }
   })
 }
+  // ============================================================
+  // 리포트
+  // ============================================================
+
+  ipcMain.handle('report:getData', async (_e, params: ReportParams) => {
+    try {
+      const data = getReportData(params)
+      return { success: true, data }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })

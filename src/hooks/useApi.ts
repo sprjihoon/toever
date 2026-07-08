@@ -55,6 +55,9 @@ declare global {
         installChromium:      () => Promise<{ success: boolean; error?: string }>
         onInstallProgress:    (cb: (p: unknown) => void) => () => void
       }
+      report: {
+        getData: (params: unknown) => Promise<{ success: boolean; data?: unknown; error?: string }>
+      }
       onAutomationEvent: (cb: (event: string, data: unknown) => void) => () => void
     }
   }

@@ -91,6 +91,11 @@ const api = {
     },
   },
 
+  // 리포트
+  report: {
+    getData: (params: unknown) => ipcRenderer.invoke('report:getData', params),
+  },
+
   // 자동화 이벤트 구독
   onAutomationEvent: (callback: (event: string, data: unknown) => void) => {
     const handler = (_: unknown, payload: { event: string; data: unknown }) => {

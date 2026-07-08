@@ -4,7 +4,8 @@ import type {
   EzadminExportBatch, ManualReviewItem, ToeverActionLog,
   BackupHistory, AppRun, OrderStatus, ManualReviewType,
   ArtifactType, RunType, RunStatus, CollectRound, ManualReviewStatus,
-  DashboardStats, SearchOrdersParams, OrderDetail
+  DashboardStats, SearchOrdersParams, OrderDetail,
+  ReportParams, ReportData, ReportPeriod
 } from '../../../shared/types'
 
 // ============================================================
@@ -525,5 +526,122 @@ export function invoiceEventRepo() {
         data.message ?? null
       )
     }
+  }
+}
+
+// ============================================================
+// 리포트
+// ============================================================
+
+function periodExpr(period: ReportPeriod): string {
+  switch (period) {
+    case 'day':     return "substr(h.order_date, 1, 10)"
+    case 'week':    return "strftime('%Y-W%W', h.order_date)"
+    case 'month':   return "substr(h.order_date, 1, 7)"
+    case 'quarter': return "substr(h.order_date,1,4)||'-Q'||(((CAST(substr(h.order_date,6,2)AS INTEGER)-1)/3)+1)"
+    case 'half':    return "substr(h.order_date,1,4)||CASE WHEN CAST(substr(h.order_date,6,2)AS INTEGER)<=6 THEN '-H1' ELSE '-H2' END"
+    case 'year':    return "substr(h.order_date, 1, 4)"
+  }
+}
+
+export function getReportData(params: ReportParams): ReportData {
+  const db = getDb()
+  const { date_from, date_to, period } = params
+  const pExpr = periodExpr(period)
+
+  // 요약 집계
+  const summaryRow = db.prepare(`
+    SELECT
+      COUNT(DISTINCT h.id)                                                        AS total_orders,
+      COUNT(DISTINCT CASE WHEN h.latest_invoice_no IS NOT NULL THEN h.id END)    AS total_shipped,
+      COALESCE(SUM(i.quantity), 0)                                                AS total_quantity,
+      COUNT(DISTINCT i.product_name)                                              AS distinct_products
+    FROM order_header h
+    LEFT JOIN order_item i ON i.order_id = h.id
+    WHERE substr(h.order_date,1,10) BETWEEN ? AND ?
+      AND h.status NOT IN ('CANCELLED','DUPLICATE_SKIPPED')
+  `).get(date_from, date_to) as {
+    total_orders: number; total_shipped: number
+    total_quantity: number; distinct_products: number
+  }
+
+  // 기간별 트렌드
+  const trend = db.prepare(`
+    SELECT
+      ${pExpr}                                                                    AS period_label,
+      COUNT(DISTINCT h.id)                                                        AS orders,
+      COUNT(DISTINCT CASE WHEN h.latest_invoice_no IS NOT NULL THEN h.id END)    AS shipped,
+      COALESCE(SUM(i.quantity), 0)                                                AS quantity
+    FROM order_header h
+    LEFT JOIN order_item i ON i.order_id = h.id
+    WHERE substr(h.order_date,1,10) BETWEEN ? AND ?
+      AND h.status NOT IN ('CANCELLED','DUPLICATE_SKIPPED')
+    GROUP BY period_label
+    ORDER BY period_label ASC
+  `).all(date_from, date_to) as { period_label: string; orders: number; shipped: number; quantity: number }[]
+
+  // 최다 출고 제품 TOP 20
+  const top_products = db.prepare(`
+    SELECT
+      i.product_name,
+      i.option_name,
+      SUM(i.quantity)       AS quantity,
+      COUNT(DISTINCT h.id)  AS order_count
+    FROM order_item i
+    JOIN order_header h ON h.id = i.order_id
+    WHERE substr(h.order_date,1,10) BETWEEN ? AND ?
+      AND h.status NOT IN ('CANCELLED','DUPLICATE_SKIPPED')
+    GROUP BY i.product_name, i.option_name
+    ORDER BY quantity DESC
+    LIMIT 20
+  `).all(date_from, date_to) as { product_name: string; option_name: string | null; quantity: number; order_count: number }[]
+
+  // 지역별 (주소 첫 단어 = 시/도)
+  const by_region = db.prepare(`
+    SELECT
+      CASE
+        WHEN instr(h.receiver_address,' ')>0
+        THEN substr(h.receiver_address,1,instr(h.receiver_address,' ')-1)
+        ELSE h.receiver_address
+      END                           AS region,
+      COUNT(DISTINCT h.id)          AS orders,
+      COALESCE(SUM(i.quantity),0)   AS quantity
+    FROM order_header h
+    LEFT JOIN order_item i ON i.order_id = h.id
+    WHERE substr(h.order_date,1,10) BETWEEN ? AND ?
+      AND h.status NOT IN ('CANCELLED','DUPLICATE_SKIPPED')
+    GROUP BY region
+    ORDER BY orders DESC
+    LIMIT 30
+  `).all(date_from, date_to) as { region: string; orders: number; quantity: number }[]
+
+  // 택배사별
+  const by_courier = db.prepare(`
+    SELECT
+      COALESCE(h.latest_courier_name,'미배송') AS courier_name,
+      COUNT(*)                                  AS count
+    FROM order_header h
+    WHERE substr(h.order_date,1,10) BETWEEN ? AND ?
+      AND h.status NOT IN ('CANCELLED','DUPLICATE_SKIPPED')
+    GROUP BY courier_name
+    ORDER BY count DESC
+  `).all(date_from, date_to) as { courier_name: string; count: number }[]
+
+  // 상태별
+  const by_status = db.prepare(`
+    SELECT status, COUNT(*) AS count
+    FROM order_header
+    WHERE substr(order_date,1,10) BETWEEN ? AND ?
+    GROUP BY status
+    ORDER BY count DESC
+  `).all(date_from, date_to) as { status: string; count: number }[]
+
+  return {
+    summary: summaryRow,
+    trend,
+    top_products,
+    by_region,
+    by_courier,
+    by_status,
   }
 }
