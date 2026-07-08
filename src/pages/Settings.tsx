@@ -82,9 +82,9 @@ export default function Settings() {
 
     if (r.success) {
       setChromiumOk(true)
-      setChromiumLog(prev => [...prev, '? Chromium ?? ??'])
+      setChromiumLog(prev => [...prev, '✓ Chromium 설치 완료'])
     } else {
-      setChromiumLog(prev => [...prev, `? ??: ${r.error}`])
+      setChromiumLog(prev => [...prev, `✗ 오류: ${r.error}`])
     }
   }
 
@@ -122,50 +122,50 @@ export default function Settings() {
   return (
     <div style={{ padding: 24, maxWidth: 640, display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#f1f5f9' }}>??</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#f1f5f9' }}>설정</h1>
         <button
           className="btn-primary"
           onClick={handleSave}
           disabled={saving}
         >
-          {saving ? '?? ?...' : saved ? '? ???' : '??'}
+          {saving ? '저장 중...' : saved ? '✓ 저장됨' : '저장'}
         </button>
       </div>
 
-      {/* ??? ?? ?? */}
-      <SectionCard title="??? ?? ??">
-        <FieldRow label="??? ID" hint="??? Support ??? ID? ?????.">
+      {/* 투에버 계정 설정 */}
+      <SectionCard title="투에버 계정 설정">
+        <FieldRow label="투에버 ID" hint="투에버 Support 사이트 로그인 ID를 입력하세요.">
           <input
             type="text"
             value={settings.toever_id}
             onChange={e => setSettings(s => ({ ...s, toever_id: e.target.value }))}
             style={inputStyle}
-            placeholder="??? ??? ID"
+            placeholder="투에버 로그인 ID"
           />
         </FieldRow>
-        <FieldRow label="????" hint="????? Windows DPAPI? ??? ?????. ??? ? ?? ?????.">
+        <FieldRow label="비밀번호" hint="비밀번호는 Windows DPAPI로 암호화됩니다. 재시작 후 다시 입력하세요.">
           <div style={{ display: 'flex', gap: 6 }}>
             <input
               type={showPassword ? 'text' : 'password'}
               value={settings.toever_password}
               onChange={e => setSettings(s => ({ ...s, toever_password: e.target.value }))}
               style={{ ...inputStyle, flex: 1 }}
-              placeholder="??? ????"
+              placeholder="투에버 비밀번호"
             />
             <button
               className="btn-secondary"
               onClick={() => setShowPassword(v => !v)}
               style={{ padding: '8px 12px', fontSize: 12 }}
             >
-              {showPassword ? '???' : '??'}
+              {showPassword ? '숨기기' : '보기'}
             </button>
           </div>
         </FieldRow>
       </SectionCard>
 
-      {/* ??? ?? */}
-      <SectionCard title="??? ??">
-        <FieldRow label="?? ?? ??" hint="?? ??, ?? ??, ?? ??? ?????.">
+      {/* 저장소 설정 */}
+      <SectionCard title="저장소 설정">
+        <FieldRow label="기본 저장 경로" hint="주문 파일, 송장 파일, DB 파일이 저장됩니다.">
           <div style={{ display: 'flex', gap: 6 }}>
             <input
               type="text"
@@ -174,16 +174,16 @@ export default function Settings() {
               style={{ ...inputStyle, flex: 1 }}
             />
             <button className="btn-secondary" onClick={handleTestStorage} style={{ padding: '8px 12px', fontSize: 12 }}>
-              ???
+              확인
             </button>
           </div>
           {storageOk !== null && (
             <span style={{ fontSize: 11, color: storageOk ? '#22c55e' : '#ef4444' }}>
-              {storageOk ? '? ?? ?? ??' : '? ?? ?? ??'}
+              {storageOk ? '✓ 경로 접근 가능' : '✗ 경로 접근 불가'}
             </span>
           )}
         </FieldRow>
-        <FieldRow label="?? ?? ?? (?? SSD)" hint="??/?? ?? ?? ?????. ?? SSD ??? ?????.">
+        <FieldRow label="백업 저장 경로 (외장 SSD)" hint="자동/수동 백업 경로입니다. 외장 SSD 경로 권장.">
           <input
             type="text"
             value={settings.backup_path}
@@ -193,8 +193,8 @@ export default function Settings() {
         </FieldRow>
       </SectionCard>
 
-      {/* ????? ?? */}
-      <SectionCard title="????? ??">
+      {/* 에즈어드민 설정 */}
+      <SectionCard title="에즈어드민 설정">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <FieldRow label="company_cd">
             <input type="text" value={settings.company_cd}
@@ -214,8 +214,8 @@ export default function Settings() {
         </div>
       </SectionCard>
 
-      {/* ??? ???? */}
-      <SectionCard title="??? ????">
+      {/* 자동화 스케줄러 */}
+      <SectionCard title="자동화 스케줄러">
         <FieldRow label="">
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
             <input
@@ -223,22 +223,22 @@ export default function Settings() {
               checked={settings.scheduler_enabled}
               onChange={e => setSettings(s => ({ ...s, scheduler_enabled: e.target.checked }))}
             />
-            <span style={{ fontSize: 13, color: '#f1f5f9' }}>???? ???</span>
+            <span style={{ fontSize: 13, color: '#f1f5f9' }}>스케줄러 활성화</span>
           </label>
         </FieldRow>
         {settings.scheduler_enabled && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-            <FieldRow label="?? ?? ??" hint="?: 10:30">
+            <FieldRow label="오전 수집 시간" hint="기본: 10:30">
               <input type="time" value={settings.morning_collect_time}
                 onChange={e => setSettings(s => ({ ...s, morning_collect_time: e.target.value }))}
                 style={inputStyle} />
             </FieldRow>
-            <FieldRow label="?? ?? ??" hint="?: 15:30">
+            <FieldRow label="오후 수집 시간" hint="기본: 15:30">
               <input type="time" value={settings.afternoon_collect_time}
                 onChange={e => setSettings(s => ({ ...s, afternoon_collect_time: e.target.value }))}
                 style={inputStyle} />
             </FieldRow>
-            <FieldRow label="?? ?? ??" hint="?: 17:30">
+            <FieldRow label="종료 백업 시간" hint="기본: 17:30">
               <input type="time" value={settings.close_backup_time}
                 onChange={e => setSettings(s => ({ ...s, close_backup_time: e.target.value }))}
                 style={inputStyle} />
@@ -246,15 +246,15 @@ export default function Settings() {
           </div>
         )}
         <div style={{ fontSize: 11, color: '#475569' }}>
-          ????? ??(?~?)?? ?????.
+          스케줄러는 평일(월~금)에만 실행됩니다.
         </div>
       </SectionCard>
 
       {/* Playwright Chromium */}
-      <SectionCard title="??? ???? (Chromium)">
+      <SectionCard title="자동화 브라우저 (Chromium)">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 13, color: chromiumOk ? '#22c55e' : '#ef4444' }}>
-            {chromiumOk === null ? '?? ?...' : chromiumOk ? '? Chromium ???' : '? Chromium ???'}
+            {chromiumOk === null ? '확인 중...' : chromiumOk ? '✓ Chromium 설치됨' : '✗ Chromium 미설치'}
           </span>
           {!chromiumOk && (
             <button
@@ -263,7 +263,7 @@ export default function Settings() {
               disabled={installingChromium}
               style={{ fontSize: 12 }}
             >
-              {installingChromium ? '???? ?...' : 'Chromium ??'}
+              {installingChromium ? '설치 중...' : 'Chromium 설치'}
             </button>
           )}
         </div>
@@ -277,32 +277,32 @@ export default function Settings() {
           </div>
         )}
         <div style={{ fontSize: 11, color: '#475569' }}>
-          ??? ???(?? ??, ?? ???)? ?????. ?? ?? ? ? 150MB ???????.
+          자동화 작업(주문 수집, 송장 업로드)에 사용됩니다. 최초 설치 시 약 150MB 다운로드합니다.
         </div>
       </SectionCard>
 
-      {/* ??? ?? */}
-      <SectionCard title="??? ??">
+      {/* 데이터 복원 */}
+      <SectionCard title="데이터 복원">
         <div style={{ fontSize: 13, color: '#94a3b8' }}>
-          ?? PC? ?? ???? ? PC? ?????. ?? SSD ?? ???? ????? ?? ??? ?????.
+          다른 PC의 백업 데이터를 이 PC에 복원합니다. 외장 SSD 또는 공유폴더의 백업 폴더를 선택하세요.
         </div>
         <div style={{
           padding: '10px 14px', borderRadius: 8,
           background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
           fontSize: 12, color: '#fca5a5'
         }}>
-          ? ?? ? ?? PC? ?? ???? ?? ???? ??????.
+          ⚠ 복원 시 현재 PC의 모든 데이터가 백업 데이터로 교체됩니다.
         </div>
         <button
           className="btn-secondary"
           onClick={() => setShowRestore(true)}
           style={{ alignSelf: 'flex-start' }}
         >
-          ?? ???? ????
+          데이터 복원 시작하기
         </button>
       </SectionCard>
 
-      {/* ?? ?? */}
+      {/* 복원 모달 */}
       {showRestore && (
         <FirstRunModal onClose={() => setShowRestore(false)} />
       )}

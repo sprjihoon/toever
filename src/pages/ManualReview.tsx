@@ -4,10 +4,10 @@ import type { ManualReviewItem } from '../../shared/types'
 type StatusFilter = 'ALL' | 'OPEN' | 'ACK' | 'RESOLVED' | 'DISMISSED'
 
 const STATUS_LABELS: Record<string, string> = {
-  OPEN:      '???',
-  ACK:       '???',
-  RESOLVED:  '????',
-  DISMISSED: '???',
+  OPEN:      '미처리',
+  ACK:       '확인중',
+  RESOLVED:  '처리완료',
+  DISMISSED: '무시됨',
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -18,17 +18,17 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 const REVIEW_TYPE_LABELS: Record<string, string> = {
-  INVALID_ORDER_NO:    '??? ????',
-  INVALID_PO_NO:       '??? ????',
-  MULTI_INVOICE:       '?? ??',
-  ORDER_CHANGED_REVIEW:'?? ??',
-  ORPHAN_INVOICE:      '??? ??',
-  HEADER_MISMATCH:     '?? ???',
-  UPLOAD_PARTIAL_FAIL: '??? ?? ??',
-  TOKEN_MISSING:       '?? ??',
-  STOREOUT_UNCLEAR:    '?? ???',
-  SCIENTIFIC_NOTATION: '??? ???',
-  UNKNOWN:             '?? ??',
+  INVALID_ORDER_NO:    '주문번호 오류',
+  INVALID_PO_NO:       '발주번호 오류',
+  MULTI_INVOICE:       '복수 송장',
+  ORDER_CHANGED_REVIEW:'주문 변경',
+  ORPHAN_INVOICE:      '고아 송장',
+  HEADER_MISMATCH:     '헤더 불일치',
+  UPLOAD_PARTIAL_FAIL: '업로드 부분 실패',
+  TOKEN_MISSING:       '토큰 누락',
+  STOREOUT_UNCLEAR:    '출고 불명확',
+  SCIENTIFIC_NOTATION: '과학적표기법',
+  UNKNOWN:             '알 수 없음',
 }
 
 export default function ManualReview() {
@@ -74,12 +74,12 @@ export default function ManualReview() {
 
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
-      {/* ?? ?? */}
+      {/* 왼쪽 목록 */}
       <div style={{ width: 420, borderRight: '1px solid #1e293b', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {/* ?? */}
+        {/* 헤더 */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid #1e293b' }}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: '#f1f5f9', marginBottom: 12 }}>?? ??</h1>
-          {/* ? ?? */}
+          <h1 style={{ fontSize: 18, fontWeight: 700, color: '#f1f5f9', marginBottom: 12 }}>수동 검토</h1>
+          {/* 상태 탭 */}
           <div style={{ display: 'flex', gap: 4 }}>
             {(['ALL', 'OPEN', 'ACK', 'RESOLVED', 'DISMISSED'] as StatusFilter[]).map(f => (
               <button
@@ -96,18 +96,18 @@ export default function ManualReview() {
                   transition: 'all 0.15s',
                 }}
               >
-                {f === 'ALL' ? '??' : STATUS_LABELS[f]}
+                {f === 'ALL' ? '전체' : STATUS_LABELS[f]}
               </button>
             ))}
           </div>
         </div>
 
-        {/* ?? */}
+        {/* 목록 */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {loading ? (
-            <div style={{ padding: 20, color: '#64748b', fontSize: 13 }}>???? ?...</div>
+            <div style={{ padding: 20, color: '#64748b', fontSize: 13 }}>불러오는 중...</div>
           ) : items.length === 0 ? (
-            <div style={{ padding: 20, color: '#64748b', fontSize: 13 }}>??? ????.</div>
+            <div style={{ padding: 20, color: '#64748b', fontSize: 13 }}>항목이 없습니다.</div>
           ) : (
             items.map(item => (
               <div
@@ -140,8 +140,8 @@ export default function ManualReview() {
                   {REVIEW_TYPE_LABELS[item.review_type] ?? item.review_type}
                 </div>
                 <div style={{ fontSize: 12, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {item.toever_order_no && `?? ${item.toever_order_no}`}
-                  {item.error_message && ` ? ${item.error_message.slice(0, 60)}`}
+                  {item.toever_order_no && `주문 ${item.toever_order_no}`}
+                  {item.error_message && ` · ${item.error_message.slice(0, 60)}`}
                 </div>
               </div>
             ))
@@ -149,15 +149,15 @@ export default function ManualReview() {
         </div>
       </div>
 
-      {/* ?? ?? */}
+      {/* 오른쪽 상세 */}
       <div style={{ flex: 1, padding: 24, overflowY: 'auto' }}>
         {!selected ? (
           <div style={{ color: '#475569', fontSize: 13, paddingTop: 40, textAlign: 'center' }}>
-            ??? ???? ?? ??? ?????.
+            왼쪽에서 항목을 선택하세요.
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* ??/?? */}
+            {/* 유형/상태 */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: '#f1f5f9' }}>
@@ -165,7 +165,7 @@ export default function ManualReview() {
                 </div>
                 {selected.toever_order_no && (
                   <div style={{ fontSize: 13, color: '#64748b', marginTop: 4, fontFamily: 'monospace' }}>
-                    ????: {selected.toever_order_no}
+                    주문번호: {selected.toever_order_no}
                   </div>
                 )}
               </div>
@@ -179,43 +179,43 @@ export default function ManualReview() {
               </span>
             </div>
 
-            {/* ?? ??? */}
+            {/* 오류 메시지 */}
             {selected.error_message && (
               <div className="card" style={{ background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)' }}>
-                <div style={{ fontWeight: 600, color: '#fca5a5', marginBottom: 6, fontSize: 13 }}>?? ??</div>
+                <div style={{ fontWeight: 600, color: '#fca5a5', marginBottom: 6, fontSize: 13 }}>오류 내용</div>
                 <div style={{ fontSize: 12, color: '#94a3b8', wordBreak: 'break-word' }}>{selected.error_message}</div>
               </div>
             )}
 
-            {/* ?? ?? */}
+            {/* 권장 조치 */}
             {selected.recommended_action && (
               <div className="card" style={{ background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.2)' }}>
-                <div style={{ fontWeight: 600, color: '#93c5fd', marginBottom: 6, fontSize: 13 }}>?? ??</div>
+                <div style={{ fontWeight: 600, color: '#93c5fd', marginBottom: 6, fontSize: 13 }}>권장 조치</div>
                 <div style={{ fontSize: 12, color: '#94a3b8' }}>{selected.recommended_action}</div>
               </div>
             )}
 
-            {/* ?? */}
+            {/* 메모 */}
             {selected.memo && (
               <div className="card">
-                <div style={{ fontWeight: 600, color: '#f1f5f9', marginBottom: 6, fontSize: 13 }}>??</div>
+                <div style={{ fontWeight: 600, color: '#f1f5f9', marginBottom: 6, fontSize: 13 }}>메모</div>
                 <div style={{ fontSize: 13, color: '#94a3b8' }}>{selected.memo}</div>
               </div>
             )}
 
-            {/* ?? ?? */}
+            {/* 관련 파일 */}
             {selected.related_file_path && (
               <div className="card">
-                <div style={{ fontWeight: 600, color: '#f1f5f9', marginBottom: 6, fontSize: 13 }}>?? ??</div>
+                <div style={{ fontWeight: 600, color: '#f1f5f9', marginBottom: 6, fontSize: 13 }}>관련 파일</div>
                 <div style={{ fontSize: 11, color: '#64748b', wordBreak: 'break-all' }}>
                   {selected.related_file_path}
                 </div>
               </div>
             )}
 
-            {/* ?? ?? ?? */}
+            {/* 상태 변경 버튼 */}
             <div>
-              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>?? ??</div>
+              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>상태 변경</div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {(['OPEN', 'ACK', 'RESOLVED', 'DISMISSED'] as const).map(s => (
                   <button
@@ -241,10 +241,10 @@ export default function ManualReview() {
               </div>
             </div>
 
-            {/* ?? ?? */}
+            {/* 감지 시간 */}
             {selected.detected_at && (
               <div style={{ fontSize: 11, color: '#475569' }}>
-                ??: {new Date(selected.detected_at).toLocaleString('ko-KR')}
+                감지: {new Date(selected.detected_at).toLocaleString('ko-KR')}
               </div>
             )}
           </div>

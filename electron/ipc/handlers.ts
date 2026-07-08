@@ -27,7 +27,7 @@ import type {
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ============================================================
-  // ??
+  // 설정
   // ============================================================
 
   ipcMain.handle('settings:getAll', async () => {
@@ -65,7 +65,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       }
       if (settings.storage_base_path) {
         setBasePath(settings.storage_base_path)
-        try { ensureAllDirs() } catch { /* ???? ?? ?? ?? */ }
+        try { ensureAllDirs() } catch { /* 경로 변경 시 폴더 생성 */ }
       }
       return { success: true }
     } catch (e) {
@@ -74,7 +74,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ????
+  // 대시보드
   // ============================================================
 
   ipcMain.handle('dashboard:getStats', async (_e, today: string) => {
@@ -87,7 +87,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ??
+  // 주문
   // ============================================================
 
   ipcMain.handle('orders:search', async (_e, params: SearchOrdersParams) => {
@@ -109,7 +109,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ?? ?? ???
+  // 주문 수집 실행
   // ============================================================
 
   ipcMain.handle('orders:collect', async (_e, params: CollectOrdersParams) => {
@@ -117,13 +117,13 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       const settings = getAllSettings()
       const password = loadPassword()
       if (!settings['toever_id'] || !password) {
-        return { success: false, error: '??? ID/????? ???? ?????.' }
+        return { success: false, error: '투에버 ID/비밀번호가 설정되지 않았습니다.' }
       }
       if (!isStorageAvailable()) {
-        return { success: false, error: '??? ??? ??? ? ????.' }
+        return { success: false, error: '스토리지 경로가 설정되지 않았습니다.' }
       }
       if (isLocked(`collect_orders:${params.business_date}:${params.round}`)) {
-        return { success: false, error: '?? ?? ????.' }
+        return { success: false, error: '이미 실행 중입니다.' }
       }
 
       const result = await collectOrders({
@@ -141,7 +141,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ????? ??? ?? ??
+  // 에즈어드민 업로드 파일 생성
   // ============================================================
 
   ipcMain.handle('ezadmin:generateUploadFile', async (_e, business_date: string) => {
@@ -157,7 +157,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ????? ?? import
+  // 에즈어드민 송장 import
   // ============================================================
 
   ipcMain.handle('invoice:importEzadmin', async (_e, params: ImportInvoiceParams) => {
@@ -177,7 +177,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('invoice:selectFile', async () => {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: '????? ?????? ?? ??',
+        title: '에즈어드민 송장파일을 선택 하세요',
         filters: [
           { name: 'Excel Files', extensions: ['xls', 'xlsx'] },
           { name: 'All Files', extensions: ['*'] },
@@ -185,7 +185,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         properties: ['openFile'],
       })
       if (result.canceled || result.filePaths.length === 0) {
-        return { success: false, error: '?? ?? ??' }
+        return { success: false, error: '선택 취소됨' }
       }
       return { success: true, data: result.filePaths[0] }
     } catch (e) {
@@ -194,7 +194,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ??? ?? ???
+  // 투에버 송장 업로드
   // ============================================================
 
   ipcMain.handle('invoice:uploadToever', async () => {
@@ -202,10 +202,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       const settings = getAllSettings()
       const password = loadPassword()
       if (!settings['toever_id'] || !password) {
-        return { success: false, error: '??? ID/????? ???? ?????.' }
+        return { success: false, error: '투에버 ID/비밀번호가 설정되지 않았습니다.' }
       }
       if (isLocked('upload_toever_invoice')) {
-        return { success: false, error: '?? ?? ????.' }
+        return { success: false, error: '이미 실행 중입니다.' }
       }
 
       const result = await uploadToeverInvoiceFile({
@@ -222,7 +222,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ?? ??
+  // 배치 관리
   // ============================================================
 
   ipcMain.handle('batch:getActive', async () => {
@@ -243,7 +243,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ????
+  // 수동검토
   // ============================================================
 
   ipcMain.handle('review:getOpen', async () => {
@@ -278,7 +278,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ??
+  // 백업
   // ============================================================
 
   ipcMain.handle('backup:status', async () => {
@@ -323,7 +323,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ?? ???
+  // 파일 시스템
   // ============================================================
 
   ipcMain.handle('fs:storageStatus', async () => {
@@ -336,25 +336,25 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         await shell.openPath(folderPath)
         return { success: true }
       }
-      return { success: false, error: '??? ?? ? ????.' }
+      return { success: false, error: '폴더를 찾을 수 없습니다.' }
     } catch (e) {
       return { success: false, error: String(e) }
     }
   })
 
   // ============================================================
-  // ?? ??
+  // 백업 복원
   // ============================================================
 
   ipcMain.handle('backup:selectRestoreFolder', async () => {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: '?? ?? ??',
+        title: '백업 폴더 선택',
         properties: ['openDirectory'],
-        buttonLabel: '? ??? ??',
+        buttonLabel: '이 폴더 선택',
       })
       if (result.canceled || result.filePaths.length === 0) {
-        return { success: false, error: '???' }
+        return { success: false, error: '취소됨' }
       }
       return { success: true, data: result.filePaths[0] }
     } catch (e) {
@@ -382,14 +382,14 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     }
   })
 
-  // ?? ?? ? ? ???
+  // 앱 재시작 및 데이터 관련
   ipcMain.handle('app:relaunch', async () => {
     app.relaunch()
     app.quit()
     return { success: true }
   })
 
-  // ? ?? ?? (?? ???? ??? true)
+  // 첫 실행 여부 (DB에 데이터가 없으면 true)
   ipcMain.handle('app:isFirstRun', async () => {
     try {
       const stats = getDashboardStats(new Date().toISOString().slice(0, 10))
@@ -400,7 +400,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // Playwright Chromium ??
+  // Playwright Chromium 관리
   // ============================================================
 
   ipcMain.handle('playwright:isChromiumInstalled', async () => {

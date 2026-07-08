@@ -2,20 +2,20 @@ import { useState, useEffect } from 'react'
 import type { OrderHeader, OrderItem, ManualReviewItem, InvoiceEvent } from '../../shared/types'
 
 const STATUS_LABELS: Record<string, string> = {
-  NEW_SHIPMENT_TARGET:     '?? ?? ??',
-  DUPLICATE_SKIPPED:       '?? ???',
-  ORDER_CHANGED_REVIEW:    '?? ??',
-  COLLECTED:               '???',
-  EXPORTED_TO_EZADMIN:     '????? ??',
-  INVOICE_IMPORTED:        '?? ??',
-  TOEVER_INVOICE_READY:    '??? ??',
-  TOEVER_INVOICE_UPLOADED: '??? ?? ??',
-  STOREOUT_INSTRUCTED:     '???? ??',
-  MANUAL_REVIEW:           '????',
-  ERROR:                   '??',
-  CANCELLED:               '??',
-  ON_HOLD:                 '??',
-  RETURN_REQUESTED:        '????',
+  NEW_SHIPMENT_TARGET:     '신규 출고 대상',
+  DUPLICATE_SKIPPED:       '중복 스킵됨',
+  ORDER_CHANGED_REVIEW:    '변경 검토',
+  COLLECTED:               '수집완료',
+  EXPORTED_TO_EZADMIN:     '에즈어드민 전송',
+  INVOICE_IMPORTED:        '송장 입력',
+  TOEVER_INVOICE_READY:    '투에버 준비',
+  TOEVER_INVOICE_UPLOADED: '투에버 송장 등록',
+  STOREOUT_INSTRUCTED:     '출고지시 완료',
+  MANUAL_REVIEW:           '수동검토',
+  ERROR:                   '오류',
+  CANCELLED:               '취소됨',
+  ON_HOLD:                 '보류',
+  RETURN_REQUESTED:        '반품요청',
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -100,15 +100,15 @@ export default function OrderList() {
 
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
-      {/* ?? ?? */}
+      {/* 왼쪽 목록 */}
       <div style={{ width: 520, borderRight: '1px solid #1e293b', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-        {/* ?? ?? */}
+        {/* 검색 필터 */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: '#f1f5f9' }}>?? ??</h1>
+          <h1 style={{ fontSize: 18, fontWeight: 700, color: '#f1f5f9' }}>주문 목록</h1>
           <input
             type="text"
-            placeholder="???? / ???? / ??? ??"
+            placeholder="주문번호 / 수령인 / 전화번호 검색"
             value={keyword}
             onChange={e => setKeyword(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') search() }}
@@ -120,7 +120,7 @@ export default function OrderList() {
               onChange={e => setStatus(e.target.value)}
               style={{ flex: 1, padding: '6px 8px', borderRadius: 6, background: '#0f172a', border: '1px solid #334155', color: '#f1f5f9', fontSize: 12 }}
             >
-              <option value="">?? ??</option>
+              <option value="">전체 상태</option>
               {Object.entries(STATUS_LABELS).map(([k, v]) => (
                 <option key={k} value={k}>{v}</option>
               ))}
@@ -130,18 +130,18 @@ export default function OrderList() {
             <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
               style={{ flex: 1, padding: '6px 8px', borderRadius: 6, background: '#0f172a', border: '1px solid #334155', color: '#f1f5f9', fontSize: 12 }} />
             <button className="btn-primary" onClick={() => search()} disabled={loading} style={{ padding: '6px 14px', fontSize: 12 }}>
-              ??
+              검색
             </button>
           </div>
-          <div style={{ fontSize: 12, color: '#64748b' }}>? {total.toLocaleString()}?</div>
+          <div style={{ fontSize: 12, color: '#64748b' }}>총 {total.toLocaleString()}건</div>
         </div>
 
-        {/* ?? ?? */}
+        {/* 주문 목록 */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {loading ? (
-            <div style={{ padding: 20, color: '#64748b', fontSize: 13 }}>?? ?...</div>
+            <div style={{ padding: 20, color: '#64748b', fontSize: 13 }}>불러오는 중...</div>
           ) : orders.length === 0 ? (
-            <div style={{ padding: 20, color: '#64748b', fontSize: 13 }}>??? ????.</div>
+            <div style={{ padding: 20, color: '#64748b', fontSize: 13 }}>주문이 없습니다.</div>
           ) : orders.map(order => (
             <div
               key={order.id}
@@ -172,27 +172,27 @@ export default function OrderList() {
           ))}
         </div>
 
-        {/* ?????? */}
+        {/* 페이지네이션 */}
         {totalPages > 1 && (
           <div style={{ padding: '10px 20px', borderTop: '1px solid #1e293b', display: 'flex', gap: 6, justifyContent: 'center' }}>
-            <button className="btn-secondary" onClick={() => search(page - 1)} disabled={page <= 1} style={{ padding: '4px 10px', fontSize: 12 }}>??</button>
+            <button className="btn-secondary" onClick={() => search(page - 1)} disabled={page <= 1} style={{ padding: '4px 10px', fontSize: 12 }}>이전</button>
             <span style={{ color: '#64748b', fontSize: 12, padding: '4px 8px' }}>{page} / {totalPages}</span>
-            <button className="btn-secondary" onClick={() => search(page + 1)} disabled={page >= totalPages} style={{ padding: '4px 10px', fontSize: 12 }}>??</button>
+            <button className="btn-secondary" onClick={() => search(page + 1)} disabled={page >= totalPages} style={{ padding: '4px 10px', fontSize: 12 }}>다음</button>
           </div>
         )}
       </div>
 
-      {/* ?? ?? */}
+      {/* 주문 상세 */}
       <div style={{ flex: 1, padding: 24, overflowY: 'auto' }}>
         {detailLoading ? (
-          <div style={{ color: '#64748b', fontSize: 13 }}>?? ?? ???? ?...</div>
+          <div style={{ color: '#64748b', fontSize: 13 }}>주문 상세 정보를 불러오는 중...</div>
         ) : !selected ? (
           <div style={{ color: '#475569', fontSize: 13, paddingTop: 40, textAlign: 'center' }}>
-            ??? ???? ?? ??? ?????.
+            왼쪽에서 주문을 선택하여 상세정보를 확인하세요.
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* ?? ?? */}
+            {/* 기본 정보 */}
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                 <div>
@@ -209,30 +209,30 @@ export default function OrderList() {
                 </span>
               </div>
 
-              {/* ?? ?? ??? */}
+              {/* 기본 정보 그리드 */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                <InfoRow label="???" value={selected.header.order_date} />
-                <InfoRow label="???" value={selected.header.receiver_phone} mono />
-                <InfoRow label="??" value={selected.header.receiver_address} colSpan={2} />
+                <InfoRow label="주문일" value={selected.header.order_date} />
+                <InfoRow label="수령인 전화" value={selected.header.receiver_phone} mono />
+                <InfoRow label="주소" value={selected.header.receiver_address} colSpan={2} />
                 {selected.header.delivery_message && (
-                  <InfoRow label="?? ??" value={selected.header.delivery_message} colSpan={2} />
+                  <InfoRow label="배송 메모" value={selected.header.delivery_message} colSpan={2} />
                 )}
                 {selected.header.latest_invoice_no && (
-                  <InfoRow label="????" value={`${selected.header.latest_courier_name ?? ''} ${selected.header.latest_invoice_no}`} mono />
+                  <InfoRow label="운송장번호" value={`${selected.header.latest_courier_name ?? ''} ${selected.header.latest_invoice_no}`} mono />
                 )}
               </div>
             </div>
 
-            {/* ?? ?? */}
+            {/* 주문 상품 */}
             {selected.items.length > 0 && (
               <div className="card">
-                <div style={{ fontWeight: 600, color: '#f1f5f9', marginBottom: 10, fontSize: 13 }}>?? ({selected.items.length}?)</div>
+                <div style={{ fontWeight: 600, color: '#f1f5f9', marginBottom: 10, fontSize: 13 }}>주문상품 ({selected.items.length}개)</div>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid #334155', color: '#64748b' }}>
-                      <th style={{ textAlign: 'left', padding: '4px 0' }}>???</th>
-                      <th style={{ textAlign: 'left', padding: '4px 0' }}>??</th>
-                      <th style={{ textAlign: 'right', padding: '4px 0' }}>??</th>
+                      <th style={{ textAlign: 'left', padding: '4px 0' }}>상품명</th>
+                      <th style={{ textAlign: 'left', padding: '4px 0' }}>옵션</th>
+                      <th style={{ textAlign: 'right', padding: '4px 0' }}>수량</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -248,10 +248,10 @@ export default function OrderList() {
               </div>
             )}
 
-            {/* ?? ?? */}
+            {/* 송장 이력 */}
             {selected.invoiceEvents.length > 0 && (
               <div className="card">
-                <div style={{ fontWeight: 600, color: '#f1f5f9', marginBottom: 10, fontSize: 13 }}>?? ??</div>
+                <div style={{ fontWeight: 600, color: '#f1f5f9', marginBottom: 10, fontSize: 13 }}>송장 이력</div>
                 {selected.invoiceEvents.map(ev => (
                   <div key={ev.id} style={{ padding: '6px 0', borderBottom: '1px solid #1e293b', fontSize: 12, color: '#94a3b8' }}>
                     <span style={{ fontFamily: 'monospace', color: '#93c5fd' }}>{ev.invoice_no}</span>
@@ -262,13 +262,13 @@ export default function OrderList() {
               </div>
             )}
 
-            {/* ?? ?? ?? */}
+            {/* 수동 검토 이력 */}
             {selected.manualReviews.length > 0 && (
               <div className="card" style={{ border: '1px solid rgba(245,158,11,0.2)' }}>
-                <div style={{ fontWeight: 600, color: '#fde68a', marginBottom: 10, fontSize: 13 }}>?? ?? ??</div>
+                <div style={{ fontWeight: 600, color: '#fde68a', marginBottom: 10, fontSize: 13 }}>수동 검토 이력</div>
                 {selected.manualReviews.map(rev => (
                   <div key={rev.id} style={{ padding: '6px 0', borderBottom: '1px solid #1e293b', fontSize: 12 }}>
-                    <div style={{ color: '#fde68a' }}>{rev.review_type} � {rev.status}</div>
+                    <div style={{ color: '#fde68a' }}>{rev.review_type} · {rev.status}</div>
                     {rev.error_message && <div style={{ color: '#94a3b8', marginTop: 2, fontSize: 11 }}>{rev.error_message}</div>}
                     {rev.memo && <div style={{ color: '#64748b', marginTop: 2 }}>{rev.memo}</div>}
                   </div>
