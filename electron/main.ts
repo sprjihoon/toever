@@ -5,6 +5,11 @@ import { initDb } from './services/db/schema'
 import { setBasePath, ensureAllDirs } from './services/storage'
 import { registerIpcHandlers } from './ipc/handlers'
 import { startScheduler, setMainWindow } from './services/scheduler'
+import { initPlaywrightBrowserPath } from './services/playwright/browserManager'
+import { readRestoreMarker } from './services/restore'
+
+// Playwright Chromium을 userData/browsers에 설치하도록 경로 먼저 설정
+initPlaywrightBrowserPath()
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
@@ -45,30 +50,38 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   // 스토리지 경로 결정:
-  // 우선순위: (1) 이전에 저장된 설정 → (2) D:\SpringToeverOps → (3) AppData fallback
+  // 우선순위: (1) 복원 마커 → (2) D:\SpringToeverOps → (3) AppData fallback
   const DEFAULT_PATH  = 'D:\\SpringToeverOps'
   const FALLBACK_PATH = path.join(app.getPath('userData'), 'SpringToeverOps')
 
-  let storagePath = DEFAULT_PATH
+  // 복원 후 재시작 시 마커에서 경로를 읽어 적용
+  const restoreMarker = readRestoreMarker()
+  if (restoreMarker?.storage_base_path) {
+    console.log(`[main] 복원 마커 발견 → 경로 적용: ${restoreMarker.storage_base_path}`)
+  }
+
+  let storagePath = restoreMarker?.storage_base_path ?? DEFAULT_PATH
   try {
     fs.mkdirSync(storagePath, { recursive: true })
   } catch {
-    // D: 드라이브가 없으면 AppData 경로로 전환
+    // 해당 드라이브가 없으면 AppData 경로로 전환
     storagePath = FALLBACK_PATH
-    console.warn(`[main] 기본 저장소 경로(D:) 접근 불가 → fallback: ${storagePath}`)
+    console.warn(`[main] 저장소 경로 접근 불가 → fallback: ${storagePath}`)
   }
 
   setBasePath(storagePath)
   const db = initDb(storagePath)
 
-  // DB에 이전에 저장한 사용자 지정 경로가 있으면 적용
-  const savedPathRow = db
-    .prepare("SELECT value FROM app_settings WHERE key = 'storage_base_path'")
-    .get() as { value: string } | undefined
+  // DB에 이전에 저장한 사용자 지정 경로가 있으면 적용 (복원 마커 없는 경우)
+  if (!restoreMarker) {
+    const savedPathRow = db
+      .prepare("SELECT value FROM app_settings WHERE key = 'storage_base_path'")
+      .get() as { value: string } | undefined
 
-  if (savedPathRow?.value && savedPathRow.value !== storagePath) {
-    setBasePath(savedPathRow.value)
-    storagePath = savedPathRow.value
+    if (savedPathRow?.value && savedPathRow.value !== storagePath) {
+      setBasePath(savedPathRow.value)
+      storagePath = savedPathRow.value
+    }
   }
 
   try {

@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Dashboard from './pages/Dashboard'
 import OrderList from './pages/OrderList'
 import ManualReview from './pages/ManualReview'
 import InvoiceManager from './pages/InvoiceManager'
 import Settings from './pages/Settings'
+import FirstRunModal from './components/FirstRunModal'
 
 type Page = 'dashboard' | 'orders' | 'invoice' | 'review' | 'settings'
 
@@ -18,6 +19,17 @@ const NAV_ITEMS: { id: Page; label: string; icon: string }[] = [
 export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
   const [reviewBadge, setReviewBadge] = useState(0)
+  const [showFirstRun, setShowFirstRun] = useState(false)
+
+  useEffect(() => {
+    const api = window.toeverApi
+    if (!api) return
+    api.appControl.isFirstRun().then(r => {
+      if (r.success && r.data === true) {
+        setShowFirstRun(true)
+      }
+    })
+  }, [])
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
@@ -94,6 +106,11 @@ export default function App() {
         )}
         {currentPage === 'settings' && <Settings />}
       </main>
+
+      {/* 첫 실행 / 백업 복원 모달 */}
+      {showFirstRun && (
+        <FirstRunModal onClose={() => setShowFirstRun(false)} />
+      )}
     </div>
   )
 }

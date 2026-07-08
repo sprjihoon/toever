@@ -55,12 +55,37 @@ const api = {
       ipcRenderer.on('backup:progress', handler)
       return () => ipcRenderer.removeListener('backup:progress', handler)
     },
+    selectRestoreFolder: () => ipcRenderer.invoke('backup:selectRestoreFolder'),
+    validateRestore: (folderPath: string) => ipcRenderer.invoke('backup:validateRestore', folderPath),
+    restore: (folderPath: string) => ipcRenderer.invoke('backup:restore', folderPath),
+    onRestoreProgress: (cb: (p: unknown) => void) => {
+      const handler = (_: unknown, p: unknown) => cb(p)
+      ipcRenderer.on('restore:progress', handler)
+      return () => ipcRenderer.removeListener('restore:progress', handler)
+    },
   },
 
   // 파일 시스템
   fs: {
     openFolder: (folderPath: string) => ipcRenderer.invoke('fs:openFolder', folderPath),
     storageStatus: () => ipcRenderer.invoke('fs:storageStatus'),
+  },
+
+  // 앱 제어
+  appControl: {
+    isFirstRun: () => ipcRenderer.invoke('app:isFirstRun'),
+    relaunch:   () => ipcRenderer.invoke('app:relaunch'),
+  },
+
+  // Playwright Chromium
+  playwright: {
+    isChromiumInstalled: () => ipcRenderer.invoke('playwright:isChromiumInstalled'),
+    installChromium: () => ipcRenderer.invoke('playwright:installChromium'),
+    onInstallProgress: (cb: (p: unknown) => void) => {
+      const handler = (_: unknown, p: unknown) => cb(p)
+      ipcRenderer.on('playwright:installProgress', handler)
+      return () => ipcRenderer.removeListener('playwright:installProgress', handler)
+    },
   },
 
   // 자동화 이벤트 구독

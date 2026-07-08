@@ -1,0 +1,48 @@
+appId: com.spring.toever-ops
+productName: Spring Toever Ops
+copyright: Copyright © 2026 Spring Toever Ops
+
+directories:
+  output: release
+  buildResources: resources
+
+# Windows NSIS 설치 패키지
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: Spring-Toever-Ops-Setup-${version}.exe
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  menuCategory: true
+  shortcutName: Spring Toever Ops
+
+# 패키지에 포함할 파일
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - "!**/*.map"
+  - "!**/*.ts"
+  - "!**/node_modules/.cache/**"
+
+# better-sqlite3 native 모듈은 asar 밖에 위치해야 함
+asar: true
+asarUnpack:
+  - "node_modules/better-sqlite3/**"
+  - "node_modules/bindings/**"
+  - "node_modules/file-uri-to-path/**"
+
+# native 모듈 재빌드 (better-sqlite3)
+npmRebuild: true
+
+# 추가 리소스 (아이콘 등)
+extraResources:
+  - from: resources/
+    to: resources/
+    filter:
+      - "**/*"
+      - "!.gitkeep"

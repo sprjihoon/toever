@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { AppSettings } from '../../shared/types'
+import FirstRunModal from '../components/FirstRunModal'
 
 const DEFAULT_SETTINGS: AppSettings = {
   toever_id:              '',
@@ -16,11 +17,15 @@ const DEFAULT_SETTINGS: AppSettings = {
 }
 
 export default function Settings() {
-  const [settings, setSettings]     = useState<AppSettings>(DEFAULT_SETTINGS)
-  const [saving, setSaving]         = useState(false)
-  const [saved, setSaved]           = useState(false)
-  const [storageOk, setStorageOk]   = useState<boolean | null>(null)
+  const [settings, setSettings]         = useState<AppSettings>(DEFAULT_SETTINGS)
+  const [saving, setSaving]             = useState(false)
+  const [saved, setSaved]               = useState(false)
+  const [storageOk, setStorageOk]       = useState<boolean | null>(null)
   const [showPassword, setShowPassword] = useState(false)
+  const [showRestore, setShowRestore]   = useState(false)
+  const [chromiumOk, setChromiumOk]     = useState<boolean | null>(null)
+  const [installingChromium, setInstallingChromium] = useState(false)
+  const [chromiumLog, setChromiumLog]   = useState<string[]>([])
 
   useEffect(() => {
     const api = window.toeverApi
@@ -29,6 +34,9 @@ export default function Settings() {
       if (result.success && result.data) {
         setSettings(result.data as AppSettings)
       }
+    })
+    api.playwright.isChromiumInstalled().then(r => {
+      if (r.success) setChromiumOk(r.data as boolean)
     })
   }, [])
 
@@ -54,6 +62,29 @@ export default function Settings() {
     const result = await api.fs.storageStatus()
     if (result.success && result.data != null) {
       setStorageOk(result.data as boolean)
+    }
+  }
+
+  const handleInstallChromium = async () => {
+    const api = window.toeverApi
+    if (!api) return
+    setInstallingChromium(true)
+    setChromiumLog([])
+
+    const unsub = api.playwright.onInstallProgress((p) => {
+      const prog = p as { message: string; done: boolean }
+      setChromiumLog(prev => [...prev, prog.message])
+    })
+
+    const r = await api.playwright.installChromium()
+    unsub()
+    setInstallingChromium(false)
+
+    if (r.success) {
+      setChromiumOk(true)
+      setChromiumLog(prev => [...prev, '? Chromium ?? ??'])
+    } else {
+      setChromiumLog(prev => [...prev, `? ??: ${r.error}`])
     }
   }
 
@@ -101,9 +132,9 @@ export default function Settings() {
         </button>
       </div>
 
-      {/* ??? ??? ?? */}
-      <SectionCard title="??? ??? ???">
-        <FieldRow label="??? ID" hint="??? ID? ?? ??????.">
+      {/* ??? ?? ?? */}
+      <SectionCard title="??? ?? ??">
+        <FieldRow label="??? ID" hint="??? Support ??? ID? ?????.">
           <input
             type="text"
             value={settings.toever_id}
@@ -112,7 +143,7 @@ export default function Settings() {
             placeholder="??? ??? ID"
           />
         </FieldRow>
-        <FieldRow label="????" hint="????? Windows DPAPI? ??? ?????. ??? ?? ???? ????.">
+        <FieldRow label="????" hint="????? Windows DPAPI? ??? ?????. ??? ? ?? ?????.">
           <div style={{ display: 'flex', gap: 6 }}>
             <input
               type={showPassword ? 'text' : 'password'}
@@ -134,7 +165,7 @@ export default function Settings() {
 
       {/* ??? ?? */}
       <SectionCard title="??? ??">
-        <FieldRow label="?? ???" hint="?? ??, ?? ??, ??? ???? ?????.">
+        <FieldRow label="?? ?? ??" hint="?? ??, ?? ??, ?? ??? ?????.">
           <div style={{ display: 'flex', gap: 6 }}>
             <input
               type="text"
@@ -148,11 +179,11 @@ export default function Settings() {
           </div>
           {storageOk !== null && (
             <span style={{ fontSize: 11, color: storageOk ? '#22c55e' : '#ef4444' }}>
-              {storageOk ? '? ?? ??' : '? ?? ??'}
+              {storageOk ? '? ?? ?? ??' : '? ?? ?? ??'}
             </span>
           )}
         </FieldRow>
-        <FieldRow label="?? ??? (?? SSD)" hint="?? ??? ???? ?????. ?? SSD ??? ?????.">
+        <FieldRow label="?? ?? ?? (?? SSD)" hint="??/?? ?? ?? ?????. ?? SSD ??? ?????.">
           <input
             type="text"
             value={settings.backup_path}
@@ -162,8 +193,8 @@ export default function Settings() {
         </FieldRow>
       </SectionCard>
 
-      {/* ?? ?? */}
-      <SectionCard title="?? ??">
+      {/* ????? ?? */}
+      <SectionCard title="????? ??">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <FieldRow label="company_cd">
             <input type="text" value={settings.company_cd}
@@ -183,8 +214,8 @@ export default function Settings() {
         </div>
       </SectionCard>
 
-      {/* ???? */}
-      <SectionCard title="?? ????">
+      {/* ??? ???? */}
+      <SectionCard title="??? ????">
         <FieldRow label="">
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
             <input
@@ -215,9 +246,66 @@ export default function Settings() {
           </div>
         )}
         <div style={{ fontSize: 11, color: '#475569' }}>
-          ????? ???(??)?? ?????.
+          ????? ??(?~?)?? ?????.
         </div>
       </SectionCard>
+
+      {/* Playwright Chromium */}
+      <SectionCard title="??? ???? (Chromium)">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 13, color: chromiumOk ? '#22c55e' : '#ef4444' }}>
+            {chromiumOk === null ? '?? ?...' : chromiumOk ? '? Chromium ???' : '? Chromium ???'}
+          </span>
+          {!chromiumOk && (
+            <button
+              className="btn-primary"
+              onClick={handleInstallChromium}
+              disabled={installingChromium}
+              style={{ fontSize: 12 }}
+            >
+              {installingChromium ? '???? ?...' : 'Chromium ??'}
+            </button>
+          )}
+        </div>
+        {chromiumLog.length > 0 && (
+          <div style={{
+            background: '#0f172a', borderRadius: 6, padding: 10,
+            fontFamily: 'monospace', fontSize: 11, color: '#94a3b8',
+            maxHeight: 120, overflowY: 'auto',
+          }}>
+            {chromiumLog.map((l, i) => <div key={i}>{l}</div>)}
+          </div>
+        )}
+        <div style={{ fontSize: 11, color: '#475569' }}>
+          ??? ???(?? ??, ?? ???)? ?????. ?? ?? ? ? 150MB ???????.
+        </div>
+      </SectionCard>
+
+      {/* ??? ?? */}
+      <SectionCard title="??? ??">
+        <div style={{ fontSize: 13, color: '#94a3b8' }}>
+          ?? PC? ?? ???? ? PC? ?????. ?? SSD ?? ???? ????? ?? ??? ?????.
+        </div>
+        <div style={{
+          padding: '10px 14px', borderRadius: 8,
+          background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+          fontSize: 12, color: '#fca5a5'
+        }}>
+          ? ?? ? ?? PC? ?? ???? ?? ???? ??????.
+        </div>
+        <button
+          className="btn-secondary"
+          onClick={() => setShowRestore(true)}
+          style={{ alignSelf: 'flex-start' }}
+        >
+          ?? ???? ????
+        </button>
+      </SectionCard>
+
+      {/* ?? ?? */}
+      {showRestore && (
+        <FirstRunModal onClose={() => setShowRestore(false)} />
+      )}
     </div>
   )
 }

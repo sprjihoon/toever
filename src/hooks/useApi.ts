@@ -31,14 +31,27 @@ declare global {
         updateStatus: (id: number, status: string, memo?: string, resolvedBy?: string) => Promise<{ success: boolean; error?: string }>
       }
       backup: {
-        status:     ()                         => Promise<{ success: boolean; data?: unknown; error?: string }>
-        run:        (type?: 'AUTO' | 'MANUAL') => Promise<{ success: boolean; data?: unknown; error?: string }>
-        getHistory: (limit?: number)           => Promise<{ success: boolean; data?: unknown; error?: string }>
-        onProgress: (cb: (p: unknown) => void) => () => void
+        status:              ()                         => Promise<{ success: boolean; data?: unknown; error?: string }>
+        run:                 (type?: 'AUTO' | 'MANUAL') => Promise<{ success: boolean; data?: unknown; error?: string }>
+        getHistory:          (limit?: number)           => Promise<{ success: boolean; data?: unknown; error?: string }>
+        onProgress:          (cb: (p: unknown) => void) => () => void
+        selectRestoreFolder: ()                         => Promise<{ success: boolean; data?: unknown; error?: string }>
+        validateRestore:     (folderPath: string)       => Promise<{ success: boolean; data?: unknown; error?: string }>
+        restore:             (folderPath: string)       => Promise<{ success: boolean; data?: unknown; error?: string }>
+        onRestoreProgress:   (cb: (p: unknown) => void) => () => void
       }
       fs: {
-        openFolder: (path: string) => Promise<{ success: boolean; error?: string }>
-        storageStatus: () => Promise<{ success: boolean; data?: boolean; error?: string }>
+        openFolder:    (path: string) => Promise<{ success: boolean; error?: string }>
+        storageStatus: ()             => Promise<{ success: boolean; data?: boolean; error?: string }>
+      }
+      appControl: {
+        isFirstRun: () => Promise<{ success: boolean; data?: unknown; error?: string }>
+        relaunch:   () => Promise<{ success: boolean; error?: string }>
+      }
+      playwright: {
+        isChromiumInstalled:  ()                         => Promise<{ success: boolean; data?: unknown; error?: string }>
+        installChromium:      ()                         => Promise<{ success: boolean; error?: string }>
+        onInstallProgress:    (cb: (p: unknown) => void) => () => void
       }
       onAutomationEvent: (cb: (event: string, data: unknown) => void) => () => void
     }
@@ -49,7 +62,6 @@ export const api = (() => {
   if (typeof window !== 'undefined' && window.toeverApi) {
     return window.toeverApi
   }
-  // 개발 환경 mock
   return null
 })()
 

@@ -1,4 +1,4 @@
-import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
+import { app, ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import fs from 'fs'
 import {
   getDashboardStats, searchOrders, getOrderDetail,
@@ -15,8 +15,10 @@ import {
   runBackup, getRunningAutomations, isBackupPathAvailable,
   getLastBackup,
 } from '../services/backup'
+import { restoreFromBackup, validateBackupFolder } from '../services/restore'
 import { savePassword, loadPassword } from '../services/credential'
 import { ensureAllDirs, isStorageAvailable, setBasePath } from '../services/storage'
+import { isChromiumInstalled, installChromium } from '../services/playwright/browserManager'
 import type {
   SearchOrdersParams, AppSettings,
   CollectOrdersParams, ImportInvoiceParams,
@@ -324,19 +326,95 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ?? ???
   // ============================================================
 
+  ipcMain.handle('fs:storageStatus', async () => {
+    return { success: true, data: isStorageAvailable() }
+  })
+
   ipcMain.handle('fs:openFolder', async (_e, folderPath: string) => {
     try {
       if (fs.existsSync(folderPath)) {
-        shell.openPath(folderPath)
+        await shell.openPath(folderPath)
         return { success: true }
       }
-      return { success: false, error: '?? ??? ???? ????.' }
+      return { success: false, error: '??? ?? ? ????.' }
     } catch (e) {
       return { success: false, error: String(e) }
     }
   })
 
-  ipcMain.handle('fs:storageStatus', async () => {
-    return { success: true, data: isStorageAvailable() }
+  // ============================================================
+  // ?? ??
+  // ============================================================
+
+  ipcMain.handle('backup:selectRestoreFolder', async () => {
+    try {
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: '?? ?? ??',
+        properties: ['openDirectory'],
+        buttonLabel: '? ??? ??',
+      })
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, error: '???' }
+      }
+      return { success: true, data: result.filePaths[0] }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('backup:validateRestore', async (_e, folderPath: string) => {
+    try {
+      const v = validateBackupFolder(folderPath)
+      return { success: v.valid, data: v, error: v.error }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('backup:restore', async (_e, folderPath: string) => {
+    try {
+      const result = await restoreFromBackup(folderPath, undefined, (progress) => {
+        mainWindow.webContents.send('restore:progress', progress)
+      })
+      return { success: result.success, data: result, error: result.error }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
+  // ?? ?? ? ? ???
+  ipcMain.handle('app:relaunch', async () => {
+    app.relaunch()
+    app.quit()
+    return { success: true }
+  })
+
+  // ? ?? ?? (?? ??? ??? true)
+  ipcMain.handle('app:isFirstRun', async () => {
+    try {
+      const stats = getDashboardStats(new Date().toISOString().slice(0, 10))
+      return { success: true, data: stats.total_collected === 0 }
+    } catch {
+      return { success: true, data: true }
+    }
+  })
+
+  // ============================================================
+  // Playwright Chromium ??
+  // ============================================================
+
+  ipcMain.handle('playwright:isChromiumInstalled', async () => {
+    return { success: true, data: isChromiumInstalled() }
+  })
+
+  ipcMain.handle('playwright:installChromium', async () => {
+    try {
+      const result = await installChromium((progress) => {
+        mainWindow.webContents.send('playwright:installProgress', progress)
+      })
+      return { success: result.success, error: result.error }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
   })
 }
