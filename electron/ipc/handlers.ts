@@ -137,13 +137,13 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       const settings = getAllSettings()
       const password = loadPassword()
       if (!settings['toever_id'] || !password) {
-        return { success: false, error: '??? ID/????? ???? ?????.' }
+        return { success: false, error: '투에버 ID/비밀번호가 설정되지 않았습니다.' }
       }
       if (!isStorageAvailable()) {
-        return { success: false, error: '???? ??? ???? ?????.' }
+        return { success: false, error: '저장소에 접근할 수 없습니다.' }
       }
       if (isLocked(`collect_orders:${params.business_date}:${params.round}`)) {
-        return { success: false, error: '?? ?? ????.' }
+        return { success: false, error: '이미 실행 중입니다.' }
       }
 
       const result = await collectOrders({
@@ -196,7 +196,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         },
       })
       updateRunStatus(run.id, result.success ? 'SUCCESS' : 'FAILED',
-        result.success ? `${result.matched}? ??` : result.errors.join('; '))
+        result.success ? `${result.matched}건 매칭` : result.errors.join('; '))
       return { success: result.success, data: result }
     } catch (e) {
       updateRunStatus(run.id, 'FAILED', String(e))
@@ -207,7 +207,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('invoice:selectFile', async () => {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: '????? ????? ?? ???',
+        title: '이지어드민 송장 파일 선택',
         filters: [
           { name: 'Excel Files', extensions: ['xls', 'xlsx'] },
           { name: 'All Files', extensions: ['*'] },
@@ -215,7 +215,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         properties: ['openFile'],
       })
       if (result.canceled || result.filePaths.length === 0) {
-        return { success: false, error: '?? ???' }
+        return { success: false, error: '파일 선택 취소' }
       }
       return { success: true, data: result.filePaths[0] }
     } catch (e) {
@@ -231,10 +231,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     const settings = getAllSettings()
     const password = loadPassword()
     if (!settings['toever_id'] || !password) {
-      return { success: false, error: '??? ID/????? ???? ?????.' }
+      return { success: false, error: '투에버 ID/비밀번호가 설정되지 않았습니다.' }
     }
     if (isLocked('upload_toever_invoice')) {
-      return { success: false, error: '?? ?? ????.' }
+      return { success: false, error: '이미 실행 중입니다.' }
     }
     const today = getKSTDateString()
     const run = createRun('UPLOAD_TOEVER_INVOICE', today, `upload_invoice:${today}:${Date.now()}`, 'manual')
@@ -248,7 +248,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         },
       })
       updateRunStatus(run.id, result.success ? 'SUCCESS' : 'FAILED',
-        result.success ? `${result.uploaded}? ???` : result.errors.join('; '))
+        result.success ? `${result.uploaded}건 업로드` : result.errors.join('; '))
       return { success: result.success, data: result }
     } catch (e) {
       updateRunStatus(run.id, 'FAILED', String(e))
@@ -371,7 +371,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         await shell.openPath(folderPath)
         return { success: true }
       }
-      return { success: false, error: '??? ?? ? ????.' }
+      return { success: false, error: '저장소에 접근할 수 없습니다.' }
     } catch (e) {
       return { success: false, error: String(e) }
     }
@@ -380,7 +380,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('fs:selectFolder', async (_e, options?: { title?: string; defaultPath?: string }) => {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: options?.title ?? '?? ??',
+        title: options?.title ?? '폴더 선택',
         defaultPath: options?.defaultPath,
         properties: ['openDirectory'],
       })
@@ -400,9 +400,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('backup:selectRestoreFolder', async () => {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: '?? ?? ??',
+        title: '백업 폴더 선택',
         properties: ['openDirectory'],
-        buttonLabel: '? ?? ??',
+        buttonLabel: '이 폴더로 복원',
       })
       if (result.canceled || result.filePaths.length === 0) {
         return { success: false, error: '???' }
