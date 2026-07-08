@@ -333,8 +333,17 @@ export async function uploadToeverInvoice(
       const afterSs = await takeScreenshot(p, `invoice_upload_attempt${attempt}_result`)
 
       const resultContent = await p.content()
-      const isSuccess = resultContent.includes('성공') || resultContent.includes('완료') ||
-        resultContent.includes('업로드') && !resultContent.includes('실패') && !resultContent.includes('오류')
+      // 성공 판별: 구체적 성공 메시지 포함 AND 실패/오류 메시지 미포함
+      const hasSuccessSign = resultContent.includes('업로드 완료') ||
+        resultContent.includes('등록 완료') ||
+        resultContent.includes('성공적으로') ||
+        resultContent.includes('처리 완료') ||
+        resultContent.includes('건 처리')
+      const hasFailSign = resultContent.includes('실패') ||
+        resultContent.includes('오류') ||
+        resultContent.includes('error') ||
+        resultContent.includes('ERROR')
+      const isSuccess = hasSuccessSign && !hasFailSign
 
       logToeverAction({
         run_id,

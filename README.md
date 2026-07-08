@@ -199,6 +199,7 @@ npm run build:dir
 | 버전 | 날짜 | 주요 변경 |
 |---|---|---|
 | 1.0.0 | 2026-07-08 | 최초 릴리즈 |
+| 1.0.1 | 2026-07-08 | P0/P1 버그 수정: DB 경로 재초기화, upsertOrderHeader 상태 업데이트, FAILED run 재시도, ezadmin export 날짜 필터 제거, restartScheduler 연동, 업로드 성공 판별 강화 |
 
 ---
 

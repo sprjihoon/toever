@@ -1,7 +1,7 @@
 import { app, BrowserWindow } from 'electron'
 import path from 'path'
 import fs from 'fs'
-import { initDb } from './services/db/schema'
+import { initDb, closeDb } from './services/db/schema'
 import { setBasePath, ensureAllDirs } from './services/storage'
 import { registerIpcHandlers } from './ipc/handlers'
 import { startScheduler, setMainWindow } from './services/scheduler'
@@ -70,7 +70,7 @@ app.whenReady().then(() => {
   }
 
   setBasePath(storagePath)
-  const db = initDb(storagePath)
+  let db = initDb(storagePath)
 
   // DB에 이전에 저장한 사용자 지정 경로가 있으면 적용 (복원 마커 없는 경우)
   if (!restoreMarker) {
@@ -79,8 +79,19 @@ app.whenReady().then(() => {
       .get() as { value: string } | undefined
 
     if (savedPathRow?.value && savedPathRow.value !== storagePath) {
-      setBasePath(savedPathRow.value)
-      storagePath = savedPathRow.value
+      const newPath = savedPathRow.value
+      try {
+        fs.mkdirSync(newPath, { recursive: true })
+        // 새 경로가 유효하면 DB를 닫고 새 경로에서 재시작
+        closeDb()
+        setBasePath(newPath)
+        storagePath = newPath
+        db = initDb(newPath)
+        console.log(`[main] 저장된 경로로 DB 전환: ${newPath}`)
+      } catch (e) {
+        // 새 경로 접근 불가 → 기존 경로 유지
+        console.warn(`[main] 저장된 경로 접근 불가 (${newPath}) → 기존 경로 유지: ${storagePath}`, e)
+      }
     }
   }
 

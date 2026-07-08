@@ -2,7 +2,7 @@ import path from 'path'
 import fs from 'fs'
 import { getDb } from '../db/schema'
 import {
-  createRun, updateRunStatus, getRunByIdempotencyKey,
+  createRun, updateRunStatus, getRunByIdempotencyKey, resetRunForRetry, getRunById,
   upsertOrderHeader, insertOrderItems, updateOrderStatus,
   getOrdersForEzadminExport, getOrdersForToeverInvoiceUpload,
   getOrderItems, addManualReview, saveFileArtifact,
@@ -20,7 +20,7 @@ import {
 } from './browser'
 import { DIRS, sha256OfFile, sha256OfBuffer, saveRawFile, buildDatePrefix } from '../storage'
 import { isValidOrderNo, isValidInvoiceNo } from '../parser/safeString'
-import type { CollectRound } from '../../../shared/types'
+import type { CollectRound, AppRun } from '../../../shared/types'
 
 // 단일 실행 락
 const runningLocks = new Set<string>()
@@ -75,7 +75,9 @@ export async function collectOrders(params: {
 
   const idempotencyKey = `source=toever|date=${params.business_date}|round=${params.round}`
   const existingRun = getRunByIdempotencyKey(idempotencyKey)
+
   if (existingRun?.status === 'SUCCESS') {
+    // 이미 성공한 경우 조기 반환 (같은 round 재실행 방지)
     releaseLock(lockKey)
     return {
       success: true,
@@ -88,7 +90,14 @@ export async function collectOrders(params: {
     }
   }
 
-  const run = createRun('COLLECT_ORDERS', params.business_date, idempotencyKey, params.round)
+  // FAILED run은 재시도 가능 — 기존 run을 RUNNING으로 리셋
+  let run: AppRun
+  if (existingRun?.status === 'FAILED') {
+    resetRunForRetry(existingRun.id)
+    run = getRunById(existingRun.id)!
+  } else {
+    run = createRun('COLLECT_ORDERS', params.business_date, idempotencyKey, params.round)
+  }
   params.emit?.('run:started', { runId: run.id, type: 'COLLECT_ORDERS' })
 
   const errors: string[] = []
@@ -199,7 +208,7 @@ export async function collectOrders(params: {
           : isChanged    ? 'ORDER_CHANGED_REVIEW'
           : 'COLLECTED'
 
-        const { id: orderId, isNew } = upsertOrderHeader({
+        const { id: orderId, isNew, existingStatus } = upsertOrderHeader({
           toever_order_no: orderNo,
           toever_po_no: null,
           order_date: params.business_date,
@@ -216,25 +225,41 @@ export async function collectOrders(params: {
           hash_snapshot: hash,
         })
 
-        if (isNew) {
-          // 다중 상품 라인 모두 저장
-          insertOrderItems(orderId, rows.map((r, idx) => ({
-            line_no: idx + 1,
+        // 상품 라인 저장 (신규 or 변경 감지된 경우)
+        const itemRows = rows.map((r, idx) => ({
+          line_no: idx + 1,
+          product_name: r.product_name,
+          option_name: r.option_name,
+          quantity: r.quantity,
+          ezadmin_product_code: null,
+          barcode: null,
+          line_hash: computeOrderHash({
+            receiver_name: r.receiver_name,
+            receiver_phone: r.receiver_phone,
+            receiver_address: r.receiver_address,
             product_name: r.product_name,
             option_name: r.option_name,
             quantity: r.quantity,
-            ezadmin_product_code: null,
-            barcode: null,
-            line_hash: computeOrderHash({
-              receiver_name: r.receiver_name,
-              receiver_phone: r.receiver_phone,
-              receiver_address: r.receiver_address,
-              product_name: r.product_name,
-              option_name: r.option_name,
-              quantity: r.quantity,
-              delivery_message: r.delivery_message,
-            }),
-          })))
+            delivery_message: r.delivery_message,
+          }),
+        }))
+
+        if (isNew) {
+          insertOrderItems(orderId, itemRows)
+        } else {
+          // 출고 진행 중인 주문은 상태·아이템 변경 금지
+          const PROTECTED_STATUSES: string[] = [
+            'EXPORTED_TO_EZADMIN', 'INVOICE_IMPORTED', 'TOEVER_INVOICE_READY',
+            'TOEVER_INVOICE_UPLOADED', 'STOREOUT_INSTRUCTED',
+          ]
+          if (!PROTECTED_STATUSES.includes(existingStatus ?? '')) {
+            // 상태 업데이트 (중복→DUPLICATE_SKIPPED, 변경→ORDER_CHANGED_REVIEW 등)
+            updateOrderStatus(orderId, status)
+          }
+          // 주문 내용 변경 시 아이템도 갱신
+          if (isChanged) {
+            insertOrderItems(orderId, itemRows)
+          }
         }
       }
     })

@@ -34,6 +34,16 @@ export function getRunByIdempotencyKey(key: string): AppRun | null {
   return getDb().prepare('SELECT * FROM app_run WHERE idempotency_key = ?').get(key) as AppRun | null
 }
 
+export function resetRunForRetry(id: number): void {
+  getDb().prepare(`
+    UPDATE app_run
+    SET status = 'RUNNING', error_code = NULL, error_message = NULL,
+        summary = NULL, finished_at = NULL,
+        started_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+    WHERE id = ?
+  `).run(id)
+}
+
 export function updateRunStatus(
   id: number,
   status: RunStatus,
@@ -55,11 +65,11 @@ export function updateRunStatus(
 
 export function upsertOrderHeader(
   data: Omit<OrderHeader, 'id' | 'first_seen_at' | 'last_seen_at'>
-): { id: number; isNew: boolean } {
+): { id: number; isNew: boolean; existingStatus?: OrderStatus } {
   const db = getDb()
   const existing = db.prepare(
-    'SELECT id, hash_snapshot FROM order_header WHERE toever_order_no = ?'
-  ).get(data.toever_order_no) as { id: number; hash_snapshot: string } | undefined
+    'SELECT id, hash_snapshot, status FROM order_header WHERE toever_order_no = ?'
+  ).get(data.toever_order_no) as { id: number; hash_snapshot: string; status: OrderStatus } | undefined
 
   if (existing) {
     db.prepare(`
@@ -68,7 +78,7 @@ export function upsertOrderHeader(
           hash_snapshot = ?, source_run_id = ?
       WHERE id = ?
     `).run(data.toever_po_no ?? null, data.hash_snapshot, data.source_run_id ?? null, existing.id)
-    return { id: existing.id, isNew: false }
+    return { id: existing.id, isNew: false, existingStatus: existing.status }
   }
 
   const result = db.prepare(`
@@ -123,13 +133,14 @@ export function updateOrderInvoice(
   `).run(invoice_no, courier_name ?? null, invoice_input_at ?? null, id)
 }
 
-export function getOrdersForEzadminExport(business_date: string): OrderHeader[] {
+export function getOrdersForEzadminExport(_business_date: string): OrderHeader[] {
+  // 날짜 필터 없이 NEW_SHIPMENT_TARGET 전체 조회
+  // (전날 미처리 주문도 포함하기 위해 날짜 제한 제거)
   return getDb().prepare(`
     SELECT * FROM order_header
     WHERE status = 'NEW_SHIPMENT_TARGET'
-    AND order_date = ?
-    ORDER BY toever_order_no
-  `).all(business_date) as OrderHeader[]
+    ORDER BY order_date ASC, toever_order_no ASC
+  `).all() as OrderHeader[]
 }
 
 export function getOrdersForToeverInvoiceUpload(): OrderHeader[] {
