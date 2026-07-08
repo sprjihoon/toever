@@ -1,4 +1,5 @@
 import { app, ipcMain, dialog, shell, BrowserWindow } from 'electron'
+import path from 'path'
 import fs from 'fs'
 import {
   getDashboardStats, searchOrders, getOrderDetail,
@@ -17,7 +18,7 @@ import {
 } from '../services/backup'
 import { restoreFromBackup, validateBackupFolder } from '../services/restore'
 import { savePassword, loadPassword, hasPasswordStored } from '../services/credential'
-import { ensureAllDirs, isStorageAvailable, setBasePath } from '../services/storage'
+import { ensureAllDirs, isStorageAvailable, setBasePath, getBasePath } from '../services/storage'
 import { isChromiumInstalled, installChromium } from '../services/playwright/browserManager'
 import { restartScheduler } from '../services/scheduler'
 import type {
@@ -58,9 +59,6 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
   ipcMain.handle('settings:save', async (_e, settings: AppSettings) => {
     try {
-      const prevAll = getAllSettings()
-      const prevStoragePath = prevAll['storage_base_path'] ?? ''
-
       for (const [key, value] of Object.entries(settings)) {
         if (key === 'toever_password') {
           // 빈 문자열이면 기존 비밀번호 유지 (변경 의도 없음)
@@ -79,10 +77,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       try { restartScheduler() } catch { /* 스케줄러 재시작 실패 무시 */ }
 
       // 저장 경로 변경 시 앱 재시작 필요
+      // getBasePath() = current DB path; restart needed if new path differs
       const needsRestart = Boolean(
         settings.storage_base_path &&
-        settings.storage_base_path !== prevStoragePath &&
-        prevStoragePath !== ''
+        settings.storage_base_path !== getBasePath()
       )
       return { success: true, data: { needsRestart } }
     } catch (e) {
@@ -434,7 +432,6 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
   // 기본 저장 경로 반환 (사용자 문서 폴더 기반)
   ipcMain.handle('app:getDefaultStoragePath', async () => {
-    const path = require('path')
     const defaultPath = path.join(app.getPath('documents'), 'SpringToeverOps')
     return { success: true, data: defaultPath }
   })

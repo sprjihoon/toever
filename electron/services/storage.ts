@@ -2,9 +2,8 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 
-const DEFAULT_BASE = 'D:\\SpringToeverOps'
-
-let basePath = DEFAULT_BASE
+// 기본값은 빈 문자열 - 반드시 setBasePath()로 초기화 후 사용
+let basePath = ''
 
 export function setBasePath(p: string): void {
   basePath = p
@@ -12,6 +11,10 @@ export function setBasePath(p: string): void {
 
 export function getBasePath(): string {
   return basePath
+}
+
+export function isBasePathSet(): boolean {
+  return basePath !== ''
 }
 
 export const DIRS = {
@@ -87,6 +90,7 @@ export function appendLog(logFile: string, message: string): void {
 }
 
 export function isStorageAvailable(): boolean {
+  if (!basePath) return false
   try {
     ensureAllDirs()
     const testFile = path.join(DIRS.database(), '.access_test')

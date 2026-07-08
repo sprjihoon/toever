@@ -92,7 +92,7 @@ export async function collectOrders(params: {
 
   // FAILED run은 재시도 가능 — 기존 run을 RUNNING으로 리셋
   let run: AppRun
-  if (existingRun?.status === 'FAILED') {
+  if (existingRun) {  // RUNNING/PARTIAL/FAILED all reset for retry
     resetRunForRetry(existingRun.id)
     run = getRunById(existingRun.id)!
   } else {
