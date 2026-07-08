@@ -38,10 +38,19 @@ export function isChromiumInstalled(): boolean {
   const browsersPath = getBrowsersPath()
   if (!fs.existsSync(browsersPath)) return false
 
-  // chromium-*/chrome-win/ 또는 chromium-*/chrome-linux/ 형태
   try {
     const entries = fs.readdirSync(browsersPath)
-    return entries.some(e => e.startsWith('chromium-'))
+    const chromiumDir = entries.find(e => e.startsWith('chromium-'))
+    if (!chromiumDir) return false
+
+    // 실제 실행 파일 존재 여부까지 확인
+    const base = path.join(browsersPath, chromiumDir)
+    const candidates = [
+      path.join(base, 'chrome-win', 'chrome.exe'),      // Windows
+      path.join(base, 'chrome-linux', 'chrome'),         // Linux
+      path.join(base, 'chrome-mac', 'Chromium.app', 'Contents', 'MacOS', 'Chromium'), // macOS
+    ]
+    return candidates.some(p => fs.existsSync(p))
   } catch {
     return false
   }

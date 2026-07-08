@@ -110,7 +110,15 @@ app.whenReady().then(() => {
   }
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow()
+      // macOS에서 창을 새로 만든 경우 IPC 핸들러·스케줄러 재등록
+      if (mainWindow) {
+        registerIpcHandlers(mainWindow)
+        setMainWindow(mainWindow)
+        startScheduler()
+      }
+    }
   })
 })
 

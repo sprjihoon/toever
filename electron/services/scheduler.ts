@@ -39,9 +39,13 @@ function isKoreanHoliday(_date: Date): boolean {
 }
 
 function isWorkday(date: Date): boolean {
-  const day = date.getDay() // 0=일, 6=토
+  // node-cron은 시스템 로컬 시간 기준이지만,
+  // 한국에서는 KST(UTC+9) 기준 요일을 사용해야 midnight 부근 오류를 방지
+  const kstDateStr = date.toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
+  const kstDate = new Date(kstDateStr + 'T00:00:00+09:00')
+  const day = kstDate.getDay() // 0=일, 6=토
   if (day === 0 || day === 6) return false
-  if (isKoreanHoliday(date)) return false
+  if (isKoreanHoliday(kstDate)) return false
   return true
 }
 

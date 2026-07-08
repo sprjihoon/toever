@@ -75,12 +75,24 @@ export function upsertOrderHeader(
   ).get(data.toever_order_no) as { id: number; hash_snapshot: string; status: OrderStatus } | undefined
 
   if (existing) {
+    // 수신인 정보(주소·연락처 등)도 최신 값으로 갱신 — 배송지 변경 반영
     db.prepare(`
       UPDATE order_header
       SET toever_po_no = ?, last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-          hash_snapshot = ?, source_run_id = ?
+          hash_snapshot = ?, source_run_id = ?,
+          receiver_name = ?, receiver_phone = ?,
+          receiver_address = ?, delivery_message = ?
       WHERE id = ?
-    `).run(data.toever_po_no ?? null, data.hash_snapshot, data.source_run_id ?? null, existing.id)
+    `).run(
+      data.toever_po_no ?? null,
+      data.hash_snapshot,
+      data.source_run_id ?? null,
+      data.receiver_name,
+      data.receiver_phone,
+      data.receiver_address,
+      data.delivery_message ?? null,
+      existing.id
+    )
     return { id: existing.id, isNew: false, existingStatus: existing.status }
   }
 

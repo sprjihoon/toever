@@ -7,7 +7,10 @@ import {
   getActiveBatches, cancelEzadminBatch, getAllSettings, setSetting,
   getBackupHistoryList, getReportData, getReportTemplates, saveReportTemplate, deleteReportTemplate, buildReport,
   createManualShipment, updateManualShipment, deleteManualShipment, getManualShipmentList,
+  createRun, updateRunStatus,
 } from '../services/db/repositories'
+import { getDb } from '../services/db/schema'
+import { getKSTDateString } from '../services/storage'
 import {
   collectOrders, generateEzadminUploadFile,
   importEzadminInvoice, uploadToeverInvoiceFile,
@@ -146,7 +149,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         toever_id: settings['toever_id'],
         toever_password: password,
         emit: (event, data) => {
-          mainWindow.webContents.send('automation:event', { event, data })
+          mainWindow?.webContents.send('automation:event', { event, data })
         },
       })
       return { success: result.success, data: result }
@@ -180,15 +183,21 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ============================================================
 
   ipcMain.handle('invoice:importEzadmin', async (_e, params: ImportInvoiceParams) => {
+    const today = getKSTDateString()
+    const run = createRun('IMPORT_INVOICE', today, `import_invoice:${today}:${Date.now()}`, 'manual')
     try {
       const result = await importEzadminInvoice({
         filePath: params.file_path,
+        run_id: run.id,
         emit: (event, data) => {
-          mainWindow.webContents.send('automation:event', { event, data })
+          mainWindow?.webContents.send('automation:event', { event, data })
         },
       })
+      updateRunStatus(run.id, result.success ? 'SUCCESS' : 'FAILED',
+        result.success ? `${result.matched}? ??` : result.errors.join('; '))
       return { success: result.success, data: result }
     } catch (e) {
+      updateRunStatus(run.id, 'FAILED', String(e))
       return { success: false, error: String(e) }
     }
   })
@@ -217,25 +226,30 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ============================================================
 
   ipcMain.handle('invoice:uploadToever', async () => {
+    const settings = getAllSettings()
+    const password = loadPassword()
+    if (!settings['toever_id'] || !password) {
+      return { success: false, error: '??? ID/????? ???? ?????.' }
+    }
+    if (isLocked('upload_toever_invoice')) {
+      return { success: false, error: '?? ?? ????.' }
+    }
+    const today = getKSTDateString()
+    const run = createRun('UPLOAD_TOEVER_INVOICE', today, `upload_invoice:${today}:${Date.now()}`, 'manual')
     try {
-      const settings = getAllSettings()
-      const password = loadPassword()
-      if (!settings['toever_id'] || !password) {
-        return { success: false, error: '??? ID/????? ???? ?????.' }
-      }
-      if (isLocked('upload_toever_invoice')) {
-        return { success: false, error: '?? ?? ????.' }
-      }
-
       const result = await uploadToeverInvoiceFile({
         toever_id: settings['toever_id'],
         toever_password: password,
+        run_id: run.id,
         emit: (event, data) => {
-          mainWindow.webContents.send('automation:event', { event, data })
+          mainWindow?.webContents.send('automation:event', { event, data })
         },
       })
+      updateRunStatus(run.id, result.success ? 'SUCCESS' : 'FAILED',
+        result.success ? `${result.uploaded}? ???` : result.errors.join('; '))
       return { success: result.success, data: result }
     } catch (e) {
+      updateRunStatus(run.id, 'FAILED', String(e))
       return { success: false, error: String(e) }
     }
   })
@@ -324,7 +338,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       const result = await runBackup({
         backup_type: backupType,
         emit: (progress) => {
-          mainWindow.webContents.send('backup:progress', progress)
+          mainWindow?.webContents.send('backup:progress', progress)
         },
       })
       return { success: result.success, data: result, error: result.error }
@@ -409,7 +423,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('backup:restore', async (_e, folderPath: string) => {
     try {
       const result = await restoreFromBackup(folderPath, undefined, (progress) => {
-        mainWindow.webContents.send('restore:progress', progress)
+        mainWindow?.webContents.send('restore:progress', progress)
       })
       return { success: result.success, data: result, error: result.error }
     } catch (e) {
@@ -424,10 +438,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     return { success: true }
   })
 
-  // ? ?? ?? (DB? ???? ??? true)
+  // ?? ?? ?? (DB? ??? ??? true)
   ipcMain.handle('app:isFirstRun', async () => {
     try {
-      const { getDb } = require('../services/db/schema')
       const row = getDb().prepare('SELECT COUNT(*) as cnt FROM order_header').get() as { cnt: number }
       return { success: true, data: row.cnt === 0 }
     } catch {
@@ -452,7 +465,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('playwright:installChromium', async () => {
     try {
       const result = await installChromium((progress) => {
-        mainWindow.webContents.send('playwright:installProgress', progress)
+        mainWindow?.webContents.send('playwright:installProgress', progress)
       })
       return { success: result.success, error: result.error }
     } catch (e) {

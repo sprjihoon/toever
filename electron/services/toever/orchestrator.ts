@@ -352,15 +352,13 @@ export async function importEzadminInvoice(params: {
     const { rows, fileHash, warnings, errors } = parseEzadminInvoiceFile(params.filePath)
 
     if (errors.length > 0) {
-      if (true) {
-        addManualReview({
+      addManualReview({
           review_type: 'HEADER_MISMATCH',
           severity: 'HIGH',
           run_id: params.run_id,
           error_message: errors.join('\n'),
           recommended_action: '이지어드민 송장 파일 포맷 확인',
         })
-      }
       return { success: false, matched: 0, multi_invoice: 0, orphan: 0, warnings, errors }
     }
 
