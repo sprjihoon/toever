@@ -5,8 +5,8 @@ import FirstRunModal from '../components/FirstRunModal'
 const DEFAULT_SETTINGS: AppSettings = {
   toever_id:              '',
   toever_password:        '',
-  storage_base_path:      'D:\\SpringToeverOps',
-  backup_path:            'E:\\SpringToeverOpsBackup',
+  storage_base_path:      '',
+  backup_path:            '',
   company_cd:             '01',
   merchant_cd:            '0001',
   entr_no:                '00117',
@@ -20,6 +20,7 @@ export default function Settings() {
   const [settings, setSettings]         = useState<AppSettings>(DEFAULT_SETTINGS)
   const [saving, setSaving]             = useState(false)
   const [saved, setSaved]               = useState(false)
+  const [needsRestart, setNeedsRestart] = useState(false)
   const [storageOk, setStorageOk]       = useState<boolean | null>(null)
   const [showPassword, setShowPassword] = useState(false)
   const [showRestore, setShowRestore]   = useState(false)
@@ -32,7 +33,19 @@ export default function Settings() {
     if (!api) return
     api.settings.getAll().then(result => {
       if (result.success && result.data) {
-        setSettings(result.data as AppSettings)
+        const s = result.data as AppSettings
+        // storage_base_path가 빈 경우 기본 경로 로딩
+        if (!s.storage_base_path) {
+          api.appControl.getDefaultStoragePath?.().then(r => {
+            if (r?.success && r.data) {
+              setSettings(prev => ({ ...prev, ...s, storage_base_path: r.data as string }))
+            } else {
+              setSettings(s)
+            }
+          }).catch(() => setSettings(s))
+        } else {
+          setSettings(s)
+        }
       }
     })
     api.playwright.isChromiumInstalled().then(r => {
@@ -45,15 +58,25 @@ export default function Settings() {
     if (!api) return
     setSaving(true)
     setSaved(false)
+    setNeedsRestart(false)
     try {
       const result = await api.settings.save(settings)
       if (result.success) {
         setSaved(true)
-        setTimeout(() => setSaved(false), 3000)
+        const d = result.data as { needsRestart?: boolean } | undefined
+        if (d?.needsRestart) {
+          setNeedsRestart(true)
+        } else {
+          setTimeout(() => setSaved(false), 3000)
+        }
       }
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleRestart = async () => {
+    await window.toeverApi?.appControl.relaunch()
   }
 
   const handleTestStorage = async () => {
@@ -62,6 +85,31 @@ export default function Settings() {
     const result = await api.fs.storageStatus()
     if (result.success && result.data != null) {
       setStorageOk(result.data as boolean)
+    }
+  }
+
+  const handleBrowseStorage = async () => {
+    const api = window.toeverApi
+    if (!api) return
+    const r = await api.fs.selectFolder({
+      title: '데이터 저장 폴더 선택',
+      defaultPath: settings.storage_base_path || undefined,
+    })
+    if (r.success && r.data) {
+      setSettings(s => ({ ...s, storage_base_path: r.data as string }))
+      setStorageOk(null)
+    }
+  }
+
+  const handleBrowseBackup = async () => {
+    const api = window.toeverApi
+    if (!api) return
+    const r = await api.fs.selectFolder({
+      title: '백업 저장 폴더 선택',
+      defaultPath: settings.backup_path || undefined,
+    })
+    if (r.success && r.data) {
+      setSettings(s => ({ ...s, backup_path: r.data as string }))
     }
   }
 
@@ -119,6 +167,18 @@ export default function Settings() {
     width: '100%',
   }
 
+  const browseBtn = {
+    padding: '8px 14px',
+    borderRadius: 6,
+    background: '#1e293b',
+    border: '1px solid #475569',
+    color: '#94a3b8',
+    fontSize: 12,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap' as const,
+    flexShrink: 0,
+  }
+
   return (
     <div style={{ padding: 24, maxWidth: 640, display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -132,6 +192,26 @@ export default function Settings() {
         </button>
       </div>
 
+      {/* 재시작 필요 안내 */}
+      {needsRestart && (
+        <div style={{
+          padding: '12px 16px', borderRadius: 8,
+          background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+        }}>
+          <div style={{ fontSize: 13, color: '#fde68a' }}>
+            ⚠ 저장 경로가 변경되었습니다. 앱을 재시작해야 새 경로가 적용됩니다.
+          </div>
+          <button onClick={handleRestart} style={{
+            padding: '6px 14px', borderRadius: 6, fontSize: 12,
+            background: '#f59e0b', color: '#0f172a', border: 'none', cursor: 'pointer', fontWeight: 600,
+            flexShrink: 0,
+          }}>
+            지금 재시작
+          </button>
+        </div>
+      )}
+
       {/* 투에버 계정 설정 */}
       <SectionCard title="투에버 계정 설정">
         <FieldRow label="투에버 ID" hint="투에버 Support 사이트 로그인 ID를 입력하세요.">
@@ -143,7 +223,7 @@ export default function Settings() {
             placeholder="투에버 로그인 ID"
           />
         </FieldRow>
-        <FieldRow label="비밀번호" hint="비밀번호는 Windows DPAPI로 암호화됩니다. 재시작 후 다시 입력하세요.">
+        <FieldRow label="비밀번호" hint="비밀번호는 Windows DPAPI로 암호화됩니다.">
           <div style={{ display: 'flex', gap: 6 }}>
             <input
               type={showPassword ? 'text' : 'password'}
@@ -153,9 +233,8 @@ export default function Settings() {
               placeholder="투에버 비밀번호"
             />
             <button
-              className="btn-secondary"
+              style={browseBtn}
               onClick={() => setShowPassword(v => !v)}
-              style={{ padding: '8px 12px', fontSize: 12 }}
             >
               {showPassword ? '숨기기' : '보기'}
             </button>
@@ -165,15 +244,19 @@ export default function Settings() {
 
       {/* 저장소 설정 */}
       <SectionCard title="저장소 설정">
-        <FieldRow label="기본 저장 경로" hint="주문 파일, 송장 파일, DB 파일이 저장됩니다.">
+        <FieldRow label="데이터 저장 경로" hint="주문 파일, 송장 파일, DB가 저장됩니다. 변경 후 재시작이 필요합니다.">
           <div style={{ display: 'flex', gap: 6 }}>
             <input
               type="text"
               value={settings.storage_base_path}
               onChange={e => setSettings(s => ({ ...s, storage_base_path: e.target.value }))}
               style={{ ...inputStyle, flex: 1 }}
+              placeholder="예: C:\Users\홍길동\Documents\SpringToeverOps"
             />
-            <button className="btn-secondary" onClick={handleTestStorage} style={{ padding: '8px 12px', fontSize: 12 }}>
+            <button style={browseBtn} onClick={handleBrowseStorage}>
+              찾아보기
+            </button>
+            <button style={browseBtn} onClick={handleTestStorage}>
               확인
             </button>
           </div>
@@ -183,13 +266,19 @@ export default function Settings() {
             </span>
           )}
         </FieldRow>
-        <FieldRow label="백업 저장 경로 (외장 SSD)" hint="자동/수동 백업 경로입니다. 외장 SSD 경로 권장.">
-          <input
-            type="text"
-            value={settings.backup_path}
-            onChange={e => setSettings(s => ({ ...s, backup_path: e.target.value }))}
-            style={inputStyle}
-          />
+        <FieldRow label="백업 저장 경로" hint="자동/수동 백업이 저장됩니다. 외장 SSD 또는 네트워크 드라이브 권장.">
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input
+              type="text"
+              value={settings.backup_path}
+              onChange={e => setSettings(s => ({ ...s, backup_path: e.target.value }))}
+              style={{ ...inputStyle, flex: 1 }}
+              placeholder="예: E:\SpringToeverOpsBackup"
+            />
+            <button style={browseBtn} onClick={handleBrowseBackup}>
+              찾아보기
+            </button>
+          </div>
         </FieldRow>
       </SectionCard>
 
@@ -250,7 +339,7 @@ export default function Settings() {
         </div>
       </SectionCard>
 
-      {/* Playwright Chromium */}
+      {/* 자동화 브라우저 */}
       <SectionCard title="자동화 브라우저 (Chromium)">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 13, color: chromiumOk ? '#22c55e' : '#ef4444' }}>

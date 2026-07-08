@@ -50,8 +50,8 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   // 스토리지 경로 결정:
-  // 우선순위: (1) 복원 마커 → (2) D:\SpringToeverOps → (3) AppData fallback
-  const DEFAULT_PATH  = 'D:\\SpringToeverOps'
+  // 우선순위: (1) 복원 마커 → (2) 사용자 문서\SpringToeverOps → (3) AppData fallback
+  const DEFAULT_PATH  = path.join(app.getPath('documents'), 'SpringToeverOps')
   const FALLBACK_PATH = path.join(app.getPath('userData'), 'SpringToeverOps')
 
   // 복원 후 재시작 시 마커에서 경로를 읽어 적용

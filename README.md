@@ -211,3 +211,8 @@ npm run build:dir
 - Windows 환경에서 파일을 직접 수정할 경우 반드시 UTF-8로 저장하세요.
 - PowerShell로 파일을 생성/수정할 때는 `[System.IO.File]::WriteAllText(path, content, New-Object System.Text.UTF8Encoding($false))` 방식을 사용하세요.
 - 한국어 문자열이 `?`로 저장되는 경우 CP949 인코딩 문제입니다. PowerShell 기본 코드페이지(949)에서 UTF-8 데이터가 잘못 변환될 수 있습니다.
+
+
+## 저장 경로 설정
+
+저장 경로는 **하드코딩되지 않습니다.** 최초 실행 마법사 또는 설정 메뉴에서 사용자가 직접 지정합니다. 기본값은 `C:\Users\{사용자}\Documents\SpringToeverOps`이며, 변경 후 앱 재시작이 필요합니다.

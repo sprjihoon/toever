@@ -5,11 +5,11 @@
  *   - DB에 주문 데이터가 없는 경우 (새 설치 or 빈 DB)
  *
  * 사용자 선택:
- *   1. 새로 시작하기 → 그냥 닫기
+ *   1. 새로 시작하기 → 저장 경로 선택 → 저장 후 닫기 (경로 변경 시 재시작)
  *   2. 백업에서 복원하기 → 폴더 선택 → 복원 → 앱 재시작
  */
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 
 interface RestoreProgress {
   phase: string
@@ -29,7 +29,15 @@ interface Props {
   onClose: () => void
 }
 
-type Step = 'CHOICE' | 'SELECTING' | 'VALIDATING' | 'CONFIRM' | 'RESTORING' | 'DONE' | 'ERROR'
+type Step =
+  | 'CHOICE'
+  | 'SETUP_PATH'
+  | 'SELECTING'
+  | 'VALIDATING'
+  | 'CONFIRM'
+  | 'RESTORING'
+  | 'DONE'
+  | 'ERROR'
 
 export default function FirstRunModal({ onClose }: Props) {
   const [step, setStep]               = useState<Step>('CHOICE')
@@ -39,9 +47,55 @@ export default function FirstRunModal({ onClose }: Props) {
   const [error, setError]             = useState<string | null>(null)
   const [relaunching, setRelaunching] = useState(false)
 
+  // 새로 시작 - 경로 설정
+  const [storagePath, setStoragePath] = useState<string>('')
+  const [savingPath, setSavingPath]   = useState(false)
+
   const addLog = useCallback((msg: string) => {
     setProgressLog(prev => [...prev, `[${new Date().toLocaleTimeString('ko-KR')}] ${msg}`])
   }, [])
+
+  // 기본 경로 로딩
+  useEffect(() => {
+    const api = window.toeverApi
+    if (!api) return
+    api.appControl.getDefaultStoragePath?.().then(r => {
+      if (r?.success && r.data) setStoragePath(r.data as string)
+    }).catch(() => {})
+  }, [])
+
+  const handleBrowseStorage = async () => {
+    const api = window.toeverApi
+    if (!api) return
+    const r = await api.fs.selectFolder({
+      title: '데이터를 저장할 폴더 선택',
+      defaultPath: storagePath || undefined,
+    })
+    if (r.success && r.data) {
+      setStoragePath(r.data as string)
+    }
+  }
+
+  const handleConfirmNewStart = async () => {
+    const api = window.toeverApi
+    if (!api || !storagePath) { onClose(); return }
+
+    setSavingPath(true)
+    try {
+      const r = await api.settings.save({ storage_base_path: storagePath })
+      const d = r.data as { needsRestart?: boolean } | undefined
+      if (d?.needsRestart) {
+        // 경로가 기본값과 달라서 재시작 필요
+        await api.appControl.relaunch()
+      } else {
+        onClose()
+      }
+    } catch {
+      onClose()
+    } finally {
+      setSavingPath(false)
+    }
+  }
 
   const handleSelectFolder = async () => {
     const api = window.toeverApi
@@ -115,8 +169,26 @@ export default function FirstRunModal({ onClose }: Props) {
 
   const box: React.CSSProperties = {
     background: '#1e293b', border: '1px solid #334155',
-    borderRadius: 14, width: 520, padding: 32,
+    borderRadius: 14, width: 560, padding: 32,
     display: 'flex', flexDirection: 'column', gap: 20,
+  }
+
+  const inputStyle: React.CSSProperties = {
+    padding: '8px 10px',
+    borderRadius: 6,
+    background: '#0f172a',
+    border: '1px solid #334155',
+    color: '#f1f5f9',
+    fontSize: 13,
+    flex: 1,
+    minWidth: 0,
+  }
+
+  const browseBtn: React.CSSProperties = {
+    padding: '8px 14px', borderRadius: 6,
+    background: '#1e293b', border: '1px solid #475569',
+    color: '#94a3b8', fontSize: 12, cursor: 'pointer',
+    whiteSpace: 'nowrap', flexShrink: 0,
   }
 
   return (
@@ -126,13 +198,14 @@ export default function FirstRunModal({ onClose }: Props) {
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 28, fontWeight: 700, color: '#3b82f6' }}>Spring Toever Ops</div>
           <div style={{ color: '#64748b', fontSize: 13, marginTop: 6 }}>
-            {step === 'CHOICE' && '처음 실행되었습니다. 시작 방법을 선택하세요.'}
-            {step === 'SELECTING' && '폴더를 선택하는 중...'}
+            {step === 'CHOICE'     && '처음 실행되었습니다. 시작 방법을 선택하세요.'}
+            {step === 'SETUP_PATH' && '데이터 저장 폴더를 선택하세요.'}
+            {step === 'SELECTING'  && '폴더를 선택하는 중...'}
             {step === 'VALIDATING' && '백업 폴더를 확인하는 중...'}
-            {step === 'CONFIRM' && '복원 정보를 확인하세요.'}
-            {step === 'RESTORING' && '데이터를 복원하는 중...'}
-            {step === 'DONE' && '복원 완료! 앱을 재시작합니다...'}
-            {step === 'ERROR' && '문제가 발생했습니다.'}
+            {step === 'CONFIRM'    && '복원 정보를 확인하세요.'}
+            {step === 'RESTORING'  && '데이터를 복원하는 중...'}
+            {step === 'DONE'       && '복원 완료! 앱을 재시작합니다...'}
+            {step === 'ERROR'      && '문제가 발생했습니다.'}
           </div>
         </div>
 
@@ -141,10 +214,10 @@ export default function FirstRunModal({ onClose }: Props) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <ChoiceCard
               title="새로 시작하기"
-              description="처음부터 새로운 데이터로 시작합니다. 투에버 ID/비밀번호를 설정하면 바로 사용할 수 있습니다."
+              description="처음부터 새로운 데이터로 시작합니다. 데이터 저장 폴더를 지정한 후 사용할 수 있습니다."
               icon="✨"
               accent="#22c55e"
-              onClick={onClose}
+              onClick={() => setStep('SETUP_PATH')}
             />
             <ChoiceCard
               title="백업에서 복원하기"
@@ -153,6 +226,63 @@ export default function FirstRunModal({ onClose }: Props) {
               accent="#3b82f6"
               onClick={handleSelectFolder}
             />
+            <div style={{ textAlign: 'center', fontSize: 11, color: '#475569' }}>
+              나중에 설정 메뉴에서도 경로를 변경하거나 복원할 수 있습니다.
+            </div>
+          </div>
+        )}
+
+        {/* SETUP_PATH 단계 - 새로 시작 경로 선택 */}
+        {step === 'SETUP_PATH' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{
+              padding: '12px 16px', borderRadius: 8,
+              background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)',
+            }}>
+              <div style={{ fontWeight: 600, color: '#f1f5f9', fontSize: 14, marginBottom: 8 }}>
+                📁 데이터 저장 폴더
+              </div>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12 }}>
+                주문 파일, 송장 파일, 데이터베이스가 저장됩니다. 여유 공간이 충분한 폴더를 선택하세요.
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  type="text"
+                  value={storagePath}
+                  onChange={e => setStoragePath(e.target.value)}
+                  style={inputStyle}
+                  placeholder="저장 폴더 경로..."
+                />
+                <button style={browseBtn} onClick={handleBrowseStorage}>
+                  찾아보기
+                </button>
+              </div>
+              {storagePath && (
+                <div style={{ marginTop: 8, fontSize: 11, color: '#64748b', wordBreak: 'break-all' }}>
+                  {storagePath}
+                </div>
+              )}
+            </div>
+
+            <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.15)' }}>
+              <div style={{ fontSize: 12, color: '#93c5fd' }}>
+                💡 기본값은 내 문서 폴더입니다. 외장 드라이브나 공유 폴더도 사용 가능합니다.
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn-secondary" onClick={() => setStep('CHOICE')} style={{ flex: 1 }}>
+                뒤로
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleConfirmNewStart}
+                disabled={!storagePath || savingPath}
+                style={{ flex: 2 }}
+              >
+                {savingPath ? '적용 중...' : '이 폴더로 시작하기'}
+              </button>
+            </div>
           </div>
         )}
 
@@ -206,17 +336,10 @@ export default function FirstRunModal({ onClose }: Props) {
               </div>
             )}
             <div style={{
-              background: '#0f172a',
-              borderRadius: 8,
-              padding: 12,
-              maxHeight: 200,
-              overflowY: 'auto',
-              fontFamily: 'monospace',
-              fontSize: 11,
-              color: '#94a3b8',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 2,
+              background: '#0f172a', borderRadius: 8, padding: 12,
+              maxHeight: 200, overflowY: 'auto',
+              fontFamily: 'monospace', fontSize: 11, color: '#94a3b8',
+              display: 'flex', flexDirection: 'column', gap: 2,
             }}>
               {progressLog.map((line, i) => (
                 <div key={i}>{line}</div>
@@ -248,13 +371,6 @@ export default function FirstRunModal({ onClose }: Props) {
             </div>
           </div>
         )}
-
-        {/* 새로 시작 선택 후 표시 옵션 */}
-        {step === 'CHOICE' && (
-          <div style={{ textAlign: 'center', fontSize: 11, color: '#475569' }}>
-            나중에 설정 메뉴에서도 복원할 수 있습니다.
-          </div>
-        )}
       </div>
     </div>
   )
@@ -273,18 +389,11 @@ function ChoiceCard({
     <button
       onClick={onClick}
       style={{
-        textAlign: 'left',
-        padding: 18,
-        borderRadius: 10,
-        background: `${accent}0d`,
-        border: `1px solid ${accent}33`,
-        cursor: 'pointer',
-        transition: 'all 0.15s',
-        display: 'flex',
-        gap: 14,
-        alignItems: 'flex-start',
-        color: 'inherit',
-        width: '100%',
+        textAlign: 'left', padding: 18, borderRadius: 10,
+        background: `${accent}0d`, border: `1px solid ${accent}33`,
+        cursor: 'pointer', transition: 'all 0.15s',
+        display: 'flex', gap: 14, alignItems: 'flex-start',
+        color: 'inherit', width: '100%',
       }}
       onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = `${accent}1a` }}
       onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = `${accent}0d` }}

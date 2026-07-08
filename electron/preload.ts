@@ -67,14 +67,17 @@ const api = {
 
   // 파일 시스템
   fs: {
-    openFolder: (folderPath: string) => ipcRenderer.invoke('fs:openFolder', folderPath),
+    openFolder:   (folderPath: string) => ipcRenderer.invoke('fs:openFolder', folderPath),
     storageStatus: () => ipcRenderer.invoke('fs:storageStatus'),
+    selectFolder:  (options?: { title?: string; defaultPath?: string }) =>
+      ipcRenderer.invoke('fs:selectFolder', options),
   },
 
   // 앱 제어
   appControl: {
-    isFirstRun: () => ipcRenderer.invoke('app:isFirstRun'),
-    relaunch:   () => ipcRenderer.invoke('app:relaunch'),
+    isFirstRun:          () => ipcRenderer.invoke('app:isFirstRun'),
+    relaunch:            () => ipcRenderer.invoke('app:relaunch'),
+    getDefaultStoragePath: () => ipcRenderer.invoke('app:getDefaultStoragePath'),
   },
 
   // Playwright Chromium

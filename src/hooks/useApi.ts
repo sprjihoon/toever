@@ -3,7 +3,7 @@ declare global {
     toeverApi: {
       settings: {
         getAll: () => Promise<{ success: boolean; data?: unknown; error?: string }>
-        save: (s: unknown) => Promise<{ success: boolean; error?: string }>
+        save: (s: unknown) => Promise<{ success: boolean; data?: unknown; error?: string }>
       }
       dashboard: {
         getStats: (today: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
@@ -41,16 +41,18 @@ declare global {
         onRestoreProgress:   (cb: (p: unknown) => void) => () => void
       }
       fs: {
-        openFolder:    (path: string) => Promise<{ success: boolean; error?: string }>
-        storageStatus: ()             => Promise<{ success: boolean; data?: boolean; error?: string }>
+        openFolder:    (path: string)                                          => Promise<{ success: boolean; error?: string }>
+        storageStatus: ()                                                      => Promise<{ success: boolean; data?: boolean; error?: string }>
+        selectFolder:  (options?: { title?: string; defaultPath?: string })    => Promise<{ success: boolean; data?: unknown; error?: string }>
       }
       appControl: {
-        isFirstRun: () => Promise<{ success: boolean; data?: unknown; error?: string }>
-        relaunch:   () => Promise<{ success: boolean; error?: string }>
+        isFirstRun:              () => Promise<{ success: boolean; data?: unknown; error?: string }>
+        relaunch:                () => Promise<{ success: boolean; error?: string }>
+        getDefaultStoragePath?:  () => Promise<{ success: boolean; data?: unknown; error?: string }>
       }
       playwright: {
-        isChromiumInstalled:  ()                         => Promise<{ success: boolean; data?: unknown; error?: string }>
-        installChromium:      ()                         => Promise<{ success: boolean; error?: string }>
+        isChromiumInstalled:  () => Promise<{ success: boolean; data?: unknown; error?: string }>
+        installChromium:      () => Promise<{ success: boolean; error?: string }>
         onInstallProgress:    (cb: (p: unknown) => void) => () => void
       }
       onAutomationEvent: (cb: (event: string, data: unknown) => void) => () => void

@@ -28,7 +28,7 @@ import type {
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ============================================================
-  // ??
+  // 설정
   // ============================================================
 
   ipcMain.handle('settings:getAll', async () => {
@@ -39,8 +39,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         data: {
           toever_id:              all['toever_id'] ?? '',
           toever_password:        loadPassword(),
-          storage_base_path:      all['storage_base_path'] ?? 'D:\\SpringToeverOps',
-          backup_path:            all['backup_path'] ?? 'E:\\SpringToeverOpsBackup',
+          storage_base_path:      all['storage_base_path'] ?? '',
+          backup_path:            all['backup_path'] ?? '',
           company_cd:             all['company_cd'] ?? '01',
           merchant_cd:            all['merchant_cd'] ?? '0001',
           entr_no:                all['entr_no'] ?? '00117',
@@ -57,6 +57,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
   ipcMain.handle('settings:save', async (_e, settings: AppSettings) => {
     try {
+      const prevAll = getAllSettings()
+      const prevStoragePath = prevAll['storage_base_path'] ?? ''
+
       for (const [key, value] of Object.entries(settings)) {
         if (key === 'toever_password') {
           savePassword(String(value))
@@ -66,18 +69,25 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       }
       if (settings.storage_base_path) {
         setBasePath(settings.storage_base_path)
-        try { ensureAllDirs() } catch { /* ?? ?? ? ?? ?? */ }
+        try { ensureAllDirs() } catch { /* 경로 변경 시 폴더 생성 시도 */ }
       }
-      // ???? ??? ??? ? ???? ???
-      try { restartScheduler() } catch { /* ???? ??? ?? ?? */ }
-      return { success: true }
+      // 스케줄러 시간이 변경될 수 있으므로 재시작
+      try { restartScheduler() } catch { /* 스케줄러 재시작 실패 무시 */ }
+
+      // 저장 경로 변경 시 앱 재시작 필요
+      const needsRestart = Boolean(
+        settings.storage_base_path &&
+        settings.storage_base_path !== prevStoragePath &&
+        prevStoragePath !== ''
+      )
+      return { success: true, data: { needsRestart } }
     } catch (e) {
       return { success: false, error: String(e) }
     }
   })
 
   // ============================================================
-  // ????
+  // 대시보드
   // ============================================================
 
   ipcMain.handle('dashboard:getStats', async (_e, today: string) => {
@@ -90,7 +100,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ??
+  // 주문
   // ============================================================
 
   ipcMain.handle('orders:search', async (_e, params: SearchOrdersParams) => {
@@ -112,7 +122,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ?? ?? ??
+  // 주문 수집 실행
   // ============================================================
 
   ipcMain.handle('orders:collect', async (_e, params: CollectOrdersParams) => {
@@ -120,13 +130,13 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       const settings = getAllSettings()
       const password = loadPassword()
       if (!settings['toever_id'] || !password) {
-        return { success: false, error: '??? ID/????? ???? ?????.' }
+        return { success: false, error: '투에버 ID/비밀번호가 설정되지 않았습니다.' }
       }
       if (!isStorageAvailable()) {
-        return { success: false, error: '???? ??? ???? ?????.' }
+        return { success: false, error: '스토리지 경로가 설정되지 않았습니다.' }
       }
       if (isLocked(`collect_orders:${params.business_date}:${params.round}`)) {
-        return { success: false, error: '?? ?? ????.' }
+        return { success: false, error: '이미 실행 중입니다.' }
       }
 
       const result = await collectOrders({
@@ -144,7 +154,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ????? ??? ?? ??
+  // 에즈어드민 업로드 파일 생성
   // ============================================================
 
   ipcMain.handle('ezadmin:generateUploadFile', async (_e, business_date: string) => {
@@ -160,7 +170,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ????? ?? import
+  // 에즈어드민 송장 import
   // ============================================================
 
   ipcMain.handle('invoice:importEzadmin', async (_e, params: ImportInvoiceParams) => {
@@ -180,7 +190,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('invoice:selectFile', async () => {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: '????? ????? ?? ???',
+        title: '에즈어드민 송장파일을 선택 하세요',
         filters: [
           { name: 'Excel Files', extensions: ['xls', 'xlsx'] },
           { name: 'All Files', extensions: ['*'] },
@@ -188,7 +198,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         properties: ['openFile'],
       })
       if (result.canceled || result.filePaths.length === 0) {
-        return { success: false, error: '?? ???' }
+        return { success: false, error: '선택 취소됨' }
       }
       return { success: true, data: result.filePaths[0] }
     } catch (e) {
@@ -197,7 +207,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ??? ?? ???
+  // 투에버 송장 업로드
   // ============================================================
 
   ipcMain.handle('invoice:uploadToever', async () => {
@@ -205,10 +215,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       const settings = getAllSettings()
       const password = loadPassword()
       if (!settings['toever_id'] || !password) {
-        return { success: false, error: '??? ID/????? ???? ?????.' }
+        return { success: false, error: '투에버 ID/비밀번호가 설정되지 않았습니다.' }
       }
       if (isLocked('upload_toever_invoice')) {
-        return { success: false, error: '?? ?? ????.' }
+        return { success: false, error: '이미 실행 중입니다.' }
       }
 
       const result = await uploadToeverInvoiceFile({
@@ -225,7 +235,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ?? ??
+  // 배치 관리
   // ============================================================
 
   ipcMain.handle('batch:getActive', async () => {
@@ -246,7 +256,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ????
+  // 수동검토
   // ============================================================
 
   ipcMain.handle('review:getOpen', async () => {
@@ -281,19 +291,19 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ??
+  // 백업
   // ============================================================
 
   ipcMain.handle('backup:status', async () => {
     try {
       const settings = getAllSettings()
-      const backupPath = settings['backup_path'] ?? 'E:\\SpringToeverOpsBackup'
+      const backupPath = settings['backup_path'] ?? ''
       return {
         success: true,
         data: {
           running_automations: getRunningAutomations(),
           storage_ok:          isStorageAvailable(),
-          backup_path_ok:      isBackupPathAvailable(backupPath),
+          backup_path_ok:      backupPath ? isBackupPathAvailable(backupPath) : false,
           backup_path:         backupPath,
           last_backup:         getLastBackup(),
         },
@@ -326,7 +336,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ?? ???
+  // 파일 시스템
   // ============================================================
 
   ipcMain.handle('fs:storageStatus', async () => {
@@ -339,25 +349,41 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         await shell.openPath(folderPath)
         return { success: true }
       }
-      return { success: false, error: '??? ?? ? ????.' }
+      return { success: false, error: '폴더를 찾을 수 없습니다.' }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('fs:selectFolder', async (_e, options?: { title?: string; defaultPath?: string }) => {
+    try {
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: options?.title ?? '폴더 선택',
+        defaultPath: options?.defaultPath,
+        properties: ['openDirectory'],
+      })
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, error: '취소됨' }
+      }
+      return { success: true, data: result.filePaths[0] }
     } catch (e) {
       return { success: false, error: String(e) }
     }
   })
 
   // ============================================================
-  // ?? ??
+  // 백업 복원
   // ============================================================
 
   ipcMain.handle('backup:selectRestoreFolder', async () => {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: '?? ?? ??',
+        title: '백업 폴더 선택',
         properties: ['openDirectory'],
-        buttonLabel: '? ?? ??',
+        buttonLabel: '이 폴더 선택',
       })
       if (result.canceled || result.filePaths.length === 0) {
-        return { success: false, error: '???' }
+        return { success: false, error: '취소됨' }
       }
       return { success: true, data: result.filePaths[0] }
     } catch (e) {
@@ -385,14 +411,14 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     }
   })
 
-  // ? ??? ? ??? ??
+  // 앱 재시작
   ipcMain.handle('app:relaunch', async () => {
     app.relaunch()
     app.quit()
     return { success: true }
   })
 
-  // ? ?? ?? (DB? ???? ??? true)
+  // 첫 실행 여부 (DB에 데이터가 없으면 true)
   ipcMain.handle('app:isFirstRun', async () => {
     try {
       const stats = getDashboardStats(new Date().toISOString().slice(0, 10))
@@ -402,8 +428,15 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     }
   })
 
+  // 기본 저장 경로 반환 (사용자 문서 폴더 기반)
+  ipcMain.handle('app:getDefaultStoragePath', async () => {
+    const path = require('path')
+    const defaultPath = path.join(app.getPath('documents'), 'SpringToeverOps')
+    return { success: true, data: defaultPath }
+  })
+
   // ============================================================
-  // Playwright Chromium ??
+  // Playwright Chromium 관리
   // ============================================================
 
   ipcMain.handle('playwright:isChromiumInstalled', async () => {
