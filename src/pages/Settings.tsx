@@ -336,8 +336,8 @@ export default function Settings() {
         </FieldRow>
       </SectionCard>
 
-      {/* 에즈어드민 설정 */}
-      <SectionCard title="에즈어드민 설정">
+      {/* 이지어드민 설정 */}
+      <SectionCard title="이지어드민 설정">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <FieldRow label="company_cd">
             <input type="text" value={settings.company_cd}

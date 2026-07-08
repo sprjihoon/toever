@@ -156,7 +156,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // 에즈어드민 업로드 파일 생성
+  // 이지어드민 업로드 파일 생성
   // ============================================================
 
   ipcMain.handle('ezadmin:generateUploadFile', async (_e, business_date: string) => {
@@ -172,7 +172,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // 에즈어드민 송장 import
+  // 이지어드민 송장 import
   // ============================================================
 
   ipcMain.handle('invoice:importEzadmin', async (_e, params: ImportInvoiceParams) => {
@@ -192,7 +192,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('invoice:selectFile', async () => {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: '에즈어드민 송장파일을 선택 하세요',
+        title: '이지어드민 송장파일을 선택 하세요',
         filters: [
           { name: 'Excel Files', extensions: ['xls', 'xlsx'] },
           { name: 'All Files', extensions: ['*'] },

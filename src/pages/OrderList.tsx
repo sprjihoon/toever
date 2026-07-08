@@ -6,7 +6,7 @@ const STATUS_LABELS: Record<string, string> = {
   DUPLICATE_SKIPPED:       '중복 스킵됨',
   ORDER_CHANGED_REVIEW:    '변경 검토',
   COLLECTED:               '수집완료',
-  EXPORTED_TO_EZADMIN:     '에즈어드민 전송',
+  EXPORTED_TO_EZADMIN:     '이지어드민 전송',
   INVOICE_IMPORTED:        '송장 입력',
   TOEVER_INVOICE_READY:    '투에버 준비',
   TOEVER_INVOICE_UPLOADED: '투에버 송장 등록',

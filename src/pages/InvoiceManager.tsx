@@ -114,7 +114,7 @@ export default function InvoiceManager() {
       <div>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#f1f5f9' }}>송장 관리</h1>
         <p style={{ color: '#64748b', marginTop: 4, fontSize: 13 }}>
-          에즈어드민에서 받은 송장파일을 import하고 투에버에 업로드합니다.
+          이지어드민에서 받은 송장파일을 import하고 투에버에 업로드합니다.
         </p>
       </div>
 
@@ -131,18 +131,18 @@ export default function InvoiceManager() {
         flexWrap: 'wrap',
         alignItems: 'center',
       }}>
-        <span>에즈어드민 업로드 파일을 에즈에서 처리 후 (수동 작업)</span>
+        <span>이지어드민 업로드 파일을 에즈에서 처리 후 (수동 작업)</span>
         <span style={{ color: '#3b82f6' }}>→</span>
         <span>Step 1: 송장 import + 파일 생성</span>
         <span style={{ color: '#3b82f6' }}>→</span>
         <span>Step 2: 투에버 자동 업로드 실행</span>
       </div>
 
-      {/* Step 1: 에즈어드민 송장 import */}
+      {/* Step 1: 이지어드민 송장 import */}
       <StepCard
         number={1}
-        title="에즈어드민 송장파일 Import"
-        description="에즈어드민에서 내려받은 송장파일을 선택하여 가져옵니다. 송장번호와 주문 매칭 후 DB에 저장됩니다."
+        title="이지어드민 송장파일 Import"
+        description="이지어드민에서 내려받은 송장파일을 선택하여 가져옵니다. 송장번호와 주문 매칭 후 DB에 저장됩니다."
       >
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
           <button className="btn-secondary" onClick={handleSelectFile} disabled={running !== null}>
