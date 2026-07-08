@@ -4,7 +4,7 @@ import fs from 'fs'
 import {
   getDashboardStats, searchOrders, getOrderDetail,
   getOpenManualReviews, getManualReviews, updateManualReviewStatus,
-  getActiveBatches, cancelEzadminBatch, getAllSettings, setSetting,
+  getActiveBatches, cancelEzadminBatch, getAllSettings, setSetting, getSetting,
   getBackupHistoryList, getReportData, getReportTemplates, saveReportTemplate, deleteReportTemplate, buildReport,
   createManualShipment, updateManualShipment, deleteManualShipment, getManualShipmentList,
   createRun, updateRunStatus,
@@ -72,19 +72,21 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         }
       }
       const prevStoragePath = getBasePath()
-      if (settings.storage_base_path) {
-        setBasePath(settings.storage_base_path)
-        try { ensureAllDirs() } catch { /* ?? ?? ? ?? ?? ?? */ }
-      }
-      // ???? ??? ??? ? ???? ???
-      try { restartScheduler() } catch { /* ???? ??? ?? ?? */ }
-
-      // ?? ?? ?? ? ? ??? ??
-      // getBasePath() = current DB path; restart needed if new path differs
       const needsRestart = Boolean(
         settings.storage_base_path &&
         settings.storage_base_path !== prevStoragePath
       )
+
+      if (settings.storage_base_path && !needsRestart) {
+        // 경로가 바뀌지 않은 경우에만 즉시 적용 (디렉터리 보장)
+        setBasePath(settings.storage_base_path)
+        try { ensureAllDirs() } catch { /* 디렉터리 생성 실패는 무시 */ }
+      }
+      // 경로가 변경됐으면 DB는 재시작 후에 전환 — 즉시 setBasePath 금지
+      // (DB는 여전히 구 경로를 가리키는 상태이므로 split-brain 방지)
+
+      try { restartScheduler() } catch { /* 스케줄러 재시작 실패 무시 */ }
+
       return { success: true, data: { needsRestart } }
     } catch (e) {
       return { success: false, error: String(e) }
@@ -438,13 +440,23 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     return { success: true }
   })
 
-  // ?? ?? ?? (DB? ??? ??? true)
+  // 최초 실행 여부: setup_completed 설정으로 판단 (주문 0건 기준은 재시작마다 모달 재표시 버그 유발)
   ipcMain.handle('app:isFirstRun', async () => {
     try {
-      const row = getDb().prepare('SELECT COUNT(*) as cnt FROM order_header').get() as { cnt: number }
-      return { success: true, data: row.cnt === 0 }
+      const setupDone = getSetting('setup_completed') === 'true'
+      return { success: true, data: !setupDone }
     } catch {
       return { success: true, data: true }
+    }
+  })
+
+  // 최초 설정 완료 표시
+  ipcMain.handle('app:markSetupComplete', async () => {
+    try {
+      setSetting('setup_completed', 'true')
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: String(e) }
     }
   })
 

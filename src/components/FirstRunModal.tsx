@@ -78,11 +78,18 @@ export default function FirstRunModal({ onClose }: Props) {
 
   const handleConfirmNewStart = async () => {
     const api = window.toeverApi
-    if (!api || !storagePath) { onClose(); return }
+    if (!api || !storagePath) {
+      // 경로 없이 닫으면 그냥 완료 처리
+      await api?.appControl.markSetupComplete?.()
+      onClose()
+      return
+    }
 
     setSavingPath(true)
     try {
       const r = await api.settings.save({ storage_base_path: storagePath })
+      // 최초 설정 완료 플래그 저장 — 재시작 후에도 모달이 다시 뜨지 않게
+      await api.appControl.markSetupComplete?.()
       const d = r.data as { needsRestart?: boolean } | undefined
       if (d?.needsRestart) {
         // 경로가 기본값과 달라서 재시작 필요
@@ -91,6 +98,7 @@ export default function FirstRunModal({ onClose }: Props) {
         onClose()
       }
     } catch {
+      await api.appControl.markSetupComplete?.()
       onClose()
     } finally {
       setSavingPath(false)

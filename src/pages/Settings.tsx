@@ -61,7 +61,7 @@ export default function Settings() {
     try {
       const result = await api.settings.save(settings)
       if (result.success) {
-        // ????? ????? ?? ??? ???
+        // ???? ?? ? ??? ???
         if (settings.toever_password.trim() !== '') {
           setHasStoredPassword(true)
           setChangingPassword(false)
@@ -110,7 +110,7 @@ export default function Settings() {
     const api = window.toeverApi
     if (!api) return
     const r = await api.fs.selectFolder({
-      title: '?? ?? ?? ??',
+      title: '?? ?? ??',
       defaultPath: settings.backup_path || undefined,
     })
     if (r.success && r.data) {
@@ -198,7 +198,7 @@ export default function Settings() {
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
         }}>
           <div style={{ fontSize: 13, color: '#fde68a' }}>
-            ? ?? ??? ???????. ?? ????? ? ??? ?????.
+            ? ?? ??? ???????. ?? ????? ?????.
           </div>
           <button onClick={handleRestart} style={{
             padding: '6px 14px', borderRadius: 6, fontSize: 12,
@@ -212,7 +212,7 @@ export default function Settings() {
 
       {/* ??? ?? ?? */}
       <SectionCard title="??? ?? ??">
-        {/* ??? ????? ??? ?? ?? */}
+        {/* ??? ???? ?? ?? ?? */}
         {settings.toever_id && hasStoredPassword && !changingPassword && (
           <div style={{
             padding: '10px 14px', borderRadius: 8,
@@ -220,7 +220,7 @@ export default function Settings() {
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
             <div>
-              <span style={{ fontSize: 13, color: '#86efac', fontWeight: 600 }}>? ???? ???</span>
+              <span style={{ fontSize: 13, color: '#86efac', fontWeight: 600 }}>? ??? ?? ???</span>
               <span style={{ fontSize: 12, color: '#64748b', marginLeft: 8 }}>
                 ID: {settings.toever_id}
               </span>
@@ -234,7 +234,7 @@ export default function Settings() {
           </div>
         )}
 
-        <FieldRow label="??? ID" hint="??? Support ??? ??? ID? ?????.">
+        <FieldRow label="??? ID" hint="??? Support ???? ??? ID? ?????.">
           <input
             type="text"
             value={settings.toever_id}
@@ -269,7 +269,7 @@ export default function Settings() {
         ) : (
           <FieldRow
             label={changingPassword ? '? ????' : '????'}
-            hint="????? Windows DPAPI? ??????. ? ? ???? ? ??? ??? ?????."
+            hint="????? Windows DPAPI? ??????. ?? ? ???? ???? ?????."
           >
             <div style={{ display: 'flex', gap: 6 }}>
               <input
@@ -277,7 +277,7 @@ export default function Settings() {
                 value={settings.toever_password}
                 onChange={e => setSettings(s => ({ ...s, toever_password: e.target.value }))}
                 style={{ ...inputStyle, flex: 1 }}
-                placeholder={changingPassword ? '? ???? ??' : '??? ????'}
+                placeholder={changingPassword ? '? ???? ??' : '???? ??'}
                 autoFocus={changingPassword}
               />
               <button style={browseBtn} onClick={() => setShowPassword(v => !v)}>
@@ -299,9 +299,9 @@ export default function Settings() {
         )}
       </SectionCard>
 
-      {/* ??? ?? */}
-      <SectionCard title="??? ??">
-        <FieldRow label="??? ?? ??" hint="?? ??, ?? ??, DB? ?????. ?? ? ???? ?????.">
+      {/* ?? ?? */}
+      <SectionCard title="?? ??">
+        <FieldRow label="??? ?? ??" hint="?? ??, ?? ??, DB? ?????. ?? ? ?? ????? ???.">
           <div style={{ display: 'flex', gap: 6 }}>
             <input
               type="text"
@@ -310,8 +310,8 @@ export default function Settings() {
               style={{ ...inputStyle, flex: 1 }}
               placeholder="?: C:\Users\???\Documents\SpringToeverOps"
             />
-            <button style={browseBtn} onClick={handleBrowseStorage}>????</button>
-            <button style={browseBtn} onClick={handleTestStorage}>??</button>
+            <button style={browseBtn} onClick={handleBrowseStorage}>?? ??</button>
+            <button style={browseBtn} onClick={handleTestStorage}>???</button>
           </div>
           {storageOk !== null && (
             <span style={{ fontSize: 11, color: storageOk ? '#22c55e' : '#ef4444' }}>
@@ -319,7 +319,7 @@ export default function Settings() {
             </span>
           )}
         </FieldRow>
-        <FieldRow label="?? ?? ??" hint="??/?? ??? ?????. ?? SSD ?? ???? ???? ??.">
+        <FieldRow label="?? ?? ??" hint="??/?? ?? ???????. ?? SSD ? ?? ???? ?????.">
           <div style={{ display: 'flex', gap: 6 }}>
             <input
               type="text"
@@ -328,13 +328,13 @@ export default function Settings() {
               style={{ ...inputStyle, flex: 1 }}
               placeholder="?: E:\SpringToeverOpsBackup"
             />
-            <button style={browseBtn} onClick={handleBrowseBackup}>????</button>
+            <button style={browseBtn} onClick={handleBrowseBackup}>?? ??</button>
           </div>
         </FieldRow>
       </SectionCard>
 
-      {/* ????? ?? */}
-      <SectionCard title="??? ????">
+      {/* ???? ?? */}
+      <SectionCard title="???? ??">
         <FieldRow label="">
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
             <input
@@ -347,17 +347,17 @@ export default function Settings() {
         </FieldRow>
         {settings.scheduler_enabled && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-            <FieldRow label="?? ?? ??" hint="??: 10:30">
+            <FieldRow label="?? ?? ??" hint="?: 10:30">
               <input type="time" value={settings.morning_collect_time}
                 onChange={e => setSettings(s => ({ ...s, morning_collect_time: e.target.value }))}
                 style={inputStyle} />
             </FieldRow>
-            <FieldRow label="?? ?? ??" hint="??: 15:30">
+            <FieldRow label="?? ?? ??" hint="?: 15:30">
               <input type="time" value={settings.afternoon_collect_time}
                 onChange={e => setSettings(s => ({ ...s, afternoon_collect_time: e.target.value }))}
                 style={inputStyle} />
             </FieldRow>
-            <FieldRow label="?? ?? ??" hint="??: 17:30">
+            <FieldRow label="?? ?? ??" hint="?: 17:30">
               <input type="time" value={settings.close_backup_time}
                 onChange={e => setSettings(s => ({ ...s, close_backup_time: e.target.value }))}
                 style={inputStyle} />
@@ -369,8 +369,8 @@ export default function Settings() {
         </div>
       </SectionCard>
 
-      {/* ??? ???? */}
-      <SectionCard title="??? ???? (Chromium)">
+      {/* ???? ?? */}
+      <SectionCard title="???? ?? (Chromium)">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 13, color: chromiumOk ? '#22c55e' : '#ef4444' }}>
             {chromiumOk === null ? '?? ?...' : chromiumOk ? '? Chromium ???' : '? Chromium ???'}
@@ -396,28 +396,28 @@ export default function Settings() {
           </div>
         )}
         <div style={{ fontSize: 11, color: '#475569' }}>
-          ??? ??(?? ??, ?? ???)? ?????. ?? ?? ? ? 150MB ???????.
+          ???? ??(??? ???, ?? ???)? ?????. ?? ?? ? ? 150MB ???????.
         </div>
       </SectionCard>
 
       {/* ??? ?? */}
       <SectionCard title="??? ??">
         <div style={{ fontSize: 13, color: '#94a3b8' }}>
-          ?? PC? ?? ???? ? PC? ?????. ?? SSD ?? ????? ?? ??? ?????.
+          ?? PC?? ??? ???? ? PC? ?????. ?? SSD ?? ???? ?? ??? ?????.
         </div>
         <div style={{
           padding: '10px 14px', borderRadius: 8,
           background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
           fontSize: 12, color: '#fca5a5'
         }}>
-          ? ?? ? ?? PC? ?? ???? ?? ???? ?????.
+          ? ?? ? ?? PC? ???? ?? ??? ???????.
         </div>
         <button
           className="btn-secondary"
           onClick={() => setShowRestore(true)}
           style={{ alignSelf: 'flex-start' }}
         >
-          ??? ?? ????
+          ?? ?? ?? ? ??
         </button>
       </SectionCard>
 

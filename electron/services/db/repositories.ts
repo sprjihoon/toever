@@ -324,10 +324,11 @@ export function cancelEzadminBatch(id: number, reason: string): void {
       SET status = 'CANCELLED', cancelled_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), cancelled_reason = ?
       WHERE id = ?
     `).run(reason, id)
-    // 해당 배치에 속한 주문을 EZADMIN_BATCH_CANCELLED로 변경 (재출고 대상으로 처리 가능)
+    // 해당 배치 주문을 NEW_SHIPMENT_TARGET으로 복원 — 즉시 재출고 가능
+    // ezadmin_batch_id도 제거해 다음 배치 생성 시 충돌 방지
     db.prepare(`
       UPDATE order_header
-      SET status = 'EZADMIN_BATCH_CANCELLED'
+      SET status = 'NEW_SHIPMENT_TARGET', ezadmin_batch_id = NULL
       WHERE ezadmin_batch_id = ? AND status = 'EXPORTED_TO_EZADMIN'
     `).run(id)
   })()

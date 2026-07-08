@@ -253,8 +253,14 @@ export async function collectOrders(params: {
             'TOEVER_INVOICE_UPLOADED', 'STOREOUT_INSTRUCTED',
           ]
           if (!PROTECTED_STATUSES.includes(existingStatus ?? '')) {
-            // 상태 업데이트 (중복→DUPLICATE_SKIPPED, 변경→ORDER_CHANGED_REVIEW 등)
-            updateOrderStatus(orderId, status)
+            // 상태 업데이트 (변경→ORDER_CHANGED_REVIEW 등)
+            // NEW_SHIPMENT_TARGET는 보호: 재수집해도 DUPLICATE_SKIPPED로 내려서는 안 됨
+            const NEW_TARGET_PROTECTED: string[] = ['NEW_SHIPMENT_TARGET']
+            if (isDuplicate && NEW_TARGET_PROTECTED.includes(existingStatus ?? '')) {
+              // 동일 내용의 NEW_SHIPMENT_TARGET → 상태 유지 (강등 금지)
+            } else {
+              updateOrderStatus(orderId, status)
+            }
           }
           // 주문 내용 변경 시 아이템도 갱신
           if (isChanged) {

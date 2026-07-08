@@ -77,6 +77,7 @@ const api = {
   // 앱 제어
   appControl: {
     isFirstRun:          () => ipcRenderer.invoke('app:isFirstRun'),
+    markSetupComplete:   () => ipcRenderer.invoke('app:markSetupComplete'),
     relaunch:            () => ipcRenderer.invoke('app:relaunch'),
     getDefaultStoragePath: () => ipcRenderer.invoke('app:getDefaultStoragePath'),
   },

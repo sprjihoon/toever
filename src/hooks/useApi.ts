@@ -47,6 +47,7 @@ declare global {
       }
       appControl: {
         isFirstRun:              () => Promise<{ success: boolean; data?: unknown; error?: string }>
+        markSetupComplete?:      () => Promise<{ success: boolean; error?: string }>
         relaunch:                () => Promise<{ success: boolean; error?: string }>
         getDefaultStoragePath?:  () => Promise<{ success: boolean; data?: unknown; error?: string }>
       }
