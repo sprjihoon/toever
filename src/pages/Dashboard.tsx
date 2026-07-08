@@ -15,15 +15,16 @@ interface AutomationLog {
   type: 'info' | 'success' | 'error' | 'progress'
 }
 
-const today = () => new Date().toISOString().slice(0, 10)
+// KST(한국 표준시) 기준 오늘 날짜 반환 - UTC toISOString()은 00:00~08:59 KST에서 전날을 반환
+const todayKST = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
 
 export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
   const [stats, setStats]                   = useState<DashboardStats | null>(null)
   const [loading, setLoading]               = useState(true)
   const [running, setRunning]               = useState<string | null>(null)
   const [logs, setLogs]                     = useState<AutomationLog[]>([])
-  const [dateFrom, setDateFrom]             = useState(today())
-  const [dateTo, setDateTo]                 = useState(today())
+  const [dateFrom, setDateFrom]             = useState(todayKST())
+  const [dateTo, setDateTo]                 = useState(todayKST())
   const [round, setRound]                   = useState<CollectRound>('morning')
   const [backupModalOpen, setBackupModalOpen] = useState(false)
 
@@ -37,7 +38,7 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
     if (!api) return
     setLoading(true)
     try {
-      const result = await api.dashboard.getStats(today())
+      const result = await api.dashboard.getStats(todayKST())
       if (result.success && result.data) {
         const data = result.data as DashboardStats
         setStats(data)
@@ -60,7 +61,7 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
         if (event === 'run:started') addLog(`실행 시작 (run_id=${d?.runId})`, 'info')
         else if (event === 'progress') addLog(d?.step ?? event, 'progress')
         else if (event === 'run:completed') {
-          addLog(`완료: ${d?.summary}`, 'success')
+          addLog(`완료: ${d?.summary ?? '처리됨'}`, 'success')
           loadStats()
         }
       })
@@ -72,11 +73,19 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
   const handleCollect = async () => {
     const api = window.toeverApi
     if (!api) { addLog('API를 사용할 수 없습니다.', 'error'); return }
+
+    // 날짜 유효성 검사
+    if (dateFrom > dateTo) {
+      addLog('오류: 시작일이 종료일보다 늦습니다.', 'error')
+      return
+    }
+
     setRunning('collect')
     addLog(`주문 수집 시작 (${round}, ${dateFrom}~${dateTo})`, 'info')
     try {
       const result = await api.orders.collect({
-        business_date: today(),
+        // business_date: 조회 시작일 기준 (dateFrom) - 업무일 기준
+        business_date: dateFrom,
         round,
         date_from: dateFrom,
         date_to: dateTo,
@@ -84,9 +93,9 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
       if (result.success && result.data) {
         const d = result.data as { collected: number; new_targets: number; duplicates: number; changed_reviews: number; errors: string[] }
         addLog(`수집 완료: 총 ${d.collected}건, 신규 ${d.new_targets}건, 중복제외 ${d.duplicates}건, 변경감지 ${d.changed_reviews}건`, 'success')
-        if (d.errors.length > 0) addLog(`경고: ${d.errors.join(' | ')}`, 'error')
+        if (d.errors && d.errors.length > 0) addLog(`경고: ${d.errors.join(' | ')}`, 'error')
       } else {
-        addLog(`수집 실패: ${result.error}`, 'error')
+        addLog(`수집 실패: ${result.error ?? '알 수 없는 오류'}`, 'error')
       }
     } finally {
       setRunning(null)
@@ -98,14 +107,14 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
     const api = window.toeverApi
     if (!api) return
     setRunning('ezadmin')
-    addLog(`이지어드민 업로드 파일 생성 시작 (${today()})`, 'info')
+    addLog(`이지어드민 업로드 파일 생성 시작 (${todayKST()})`, 'info')
     try {
-      const result = await api.ezadmin.generateUploadFile(today())
+      const result = await api.ezadmin.generateUploadFile(todayKST())
       if (result.success && result.data) {
         const d = result.data as { filePath?: string; rowCount?: number }
         addLog(`생성 완료: ${d.rowCount}행 → ${d.filePath}`, 'success')
       } else {
-        addLog(`생성 실패: ${result.error}`, 'error')
+        addLog(`생성 실패: ${result.error ?? '알 수 없는 오류'}`, 'error')
       }
     } finally {
       setRunning(null)
@@ -161,7 +170,7 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: '#f1f5f9' }}>대시보드</h1>
           <div style={{ color: '#64748b', fontSize: 13, marginTop: 4 }}>
-            {today()} 기준 현황
+            {todayKST()} 기준 현황 (KST)
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>

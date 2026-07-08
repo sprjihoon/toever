@@ -243,17 +243,19 @@ export function getOrderDetail(id: number): OrderDetail | null {
 
 export function insertOrderItems(order_id: number, items: Omit<OrderItem, 'id' | 'order_id'>[]): void {
   const db = getDb()
-  const stmt = db.prepare(`
-    INSERT OR REPLACE INTO order_item (order_id, line_no, product_name, option_name, quantity, ezadmin_product_code, barcode, line_hash)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `)
-  const insertMany = db.transaction((rows: typeof items) => {
+  // 기존 아이템 삭제 후 전체 재삽입 (line_no UNIQUE 제약 없이도 중복 방지)
+  const replaceAll = db.transaction((rows: typeof items) => {
+    db.prepare('DELETE FROM order_item WHERE order_id = ?').run(order_id)
+    const stmt = db.prepare(`
+      INSERT INTO order_item (order_id, line_no, product_name, option_name, quantity, ezadmin_product_code, barcode, line_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
     for (const row of rows) {
       stmt.run(order_id, row.line_no, row.product_name, row.option_name ?? null,
         row.quantity, row.ezadmin_product_code ?? null, row.barcode ?? null, row.line_hash)
     }
   })
-  insertMany(items)
+  replaceAll(items)
 }
 
 export function getOrderItems(order_id: number): OrderItem[] {
@@ -334,6 +336,16 @@ export function addManualReview(data: {
     data.recommended_action ?? null
   )
   return db.prepare('SELECT * FROM manual_review_queue WHERE id = ?').get(result.lastInsertRowid) as ManualReviewItem
+}
+
+/**
+ * 같은 주문번호 + review_type으로 이미 OPEN인 수동검토 항목이 있는지 확인 (중복 삽입 방지)
+ */
+export function hasOpenReview(toever_order_no: string, review_type: ManualReviewType): boolean {
+  const row = getDb().prepare(
+    "SELECT id FROM manual_review_queue WHERE toever_order_no = ? AND review_type = ? AND status = 'OPEN'"
+  ).get(toever_order_no, review_type)
+  return row !== undefined
 }
 
 export function updateManualReviewStatus(

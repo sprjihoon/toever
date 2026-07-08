@@ -15,6 +15,7 @@ import XLSX from 'xlsx'
 import path from 'path'
 import fs from 'fs'
 import { DIRS, buildDatePrefix, sha256OfBuffer } from '../storage'
+import { getDb } from '../db/schema'
 import { saveFileArtifact, createEzadminBatch, updateOrderStatus } from '../db/repositories'
 import type { OrderHeader, OrderItem } from '../../../shared/types'
 
@@ -85,23 +86,27 @@ export function buildEzadminUploadFile(
   fs.writeFileSync(filePath, buf)
 
   const sha256 = sha256OfBuffer(buf)
-  const artifact = saveFileArtifact({
-    artifact_type: 'EZADMIN_UPLOAD',
-    original_filename: filename,
-    stored_path: filePath,
-    sha256,
-    size_bytes: buf.length,
-    run_id: run_id ?? null,
-  })
 
-  const batch = createEzadminBatch(orders.length, artifact.id)
+  // DB 작업 전체를 단일 트랜잭션으로 묶어 파일 생성-배치-상태변경을 원자적으로 처리
+  const db = getDb()
+  const { batchId } = db.transaction(() => {
+    const artifact = saveFileArtifact({
+      artifact_type: 'EZADMIN_UPLOAD',
+      original_filename: filename,
+      stored_path: filePath,
+      sha256,
+      size_bytes: buf.length,
+      run_id: run_id ?? null,
+    })
+    // order_count는 고유 주문건수(헤더 수), row_count는 상품 라인 수
+    const batch = createEzadminBatch(orders.length, artifact.id)
+    for (const { header } of orders) {
+      updateOrderStatus(header.id, 'EXPORTED_TO_EZADMIN')
+    }
+    return { batchId: batch.id }
+  })()
 
-  // 주문 상태 EXPORTED_TO_EZADMIN으로 변경
-  for (const { header } of orders) {
-    updateOrderStatus(header.id, 'EXPORTED_TO_EZADMIN')
-  }
-
-  return { filePath, batchId: batch.id, rowCount: dataRows.length }
+  return { filePath, batchId, rowCount: dataRows.length }
 }
 
 function makeRow(

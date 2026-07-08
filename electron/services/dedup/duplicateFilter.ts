@@ -10,7 +10,7 @@
  * - ORDER_CHANGED_REVIEW: 같은 주문번호인데 내용 변경 감지 → 수동검토
  */
 
-import { getOrderByOrderNo, updateOrderStatus, addManualReview } from '../db/repositories'
+import { getOrderByOrderNo, updateOrderStatus, addManualReview, hasOpenReview } from '../db/repositories'
 import { computeOrderHash } from '../parser/toeverOrderParser'
 import type { ToeverOrderRow } from '../../../shared/types'
 
@@ -44,6 +44,15 @@ const DUPLICATE_STATUSES = new Set([
   'DUPLICATE_SKIPPED',
   'ORDER_CHANGED_REVIEW',
   'ERROR',
+])
+
+/**
+ * 이 상태이면 배치 취소된 주문 — 내용 비교 후 재출고 가능
+ * SKIP_STATUSES에 포함하면 재출고 불가능, DUPLICATE_STATUSES에 포함하면
+ * 같은 내용이어도 DUPLICATE_SKIPPED가 되어 버림 → 별도 처리 필요
+ */
+const REPROCESS_STATUSES = new Set([
+  'EZADMIN_BATCH_CANCELLED',
 ])
 
 /**
@@ -95,6 +104,30 @@ export function filterNewShipmentTargets(
       continue
     }
 
+    if (REPROCESS_STATUSES.has(existing.status)) {
+      // 배치 취소 주문 → 내용 비교 후 재출고 또는 수동검토
+      const newHash = computeGroupHash(first, groupRows)
+      if (existing.hash_snapshot === newHash) {
+        // 동일 내용 → 신규 출고 대상으로 재처리 (재업로드 허용)
+        new_targets.push(first)
+      } else {
+        // 내용 변경 감지 → 수동검토 (배치 취소 + 내용 변경)
+        changed_reviews.push(orderNo)
+        updateOrderStatus(existing.id, 'ORDER_CHANGED_REVIEW')
+        if (!hasOpenReview(orderNo, 'ORDER_CHANGED_REVIEW')) {
+          addManualReview({
+            review_type:        'ORDER_CHANGED_REVIEW',
+            severity:           'HIGH',
+            toever_order_no:    orderNo,
+            run_id,
+            error_message:      '배치 취소 주문인데 수취인/주소/상품/수량 중 하나가 변경됨',
+            recommended_action: '기존 주문과 신규 수집 주문을 비교하여 수동 확인 필요',
+          })
+        }
+      }
+      continue
+    }
+
     if (DUPLICATE_STATUSES.has(existing.status)) {
       // 이전에 수집된 주문 → 내용 비교
       const newHash = computeGroupHash(first, groupRows)
@@ -103,17 +136,19 @@ export function filterNewShipmentTargets(
         // 동일 내용 → 중복
         duplicates.push(orderNo)
       } else {
-        // 내용 변경 감지 → 수동검토
+        // 내용 변경 감지 → 수동검토 (중복 리뷰 방지)
         changed_reviews.push(orderNo)
         updateOrderStatus(existing.id, 'ORDER_CHANGED_REVIEW')
-        addManualReview({
-          review_type:        'ORDER_CHANGED_REVIEW',
-          severity:           'HIGH',
-          toever_order_no:    orderNo,
-          run_id,
-          error_message:      '같은 주문번호인데 수취인/주소/상품/수량 중 하나가 변경됨',
-          recommended_action: '기존 주문과 신규 수집 주문을 비교하여 수동 확인 필요',
-        })
+        if (!hasOpenReview(orderNo, 'ORDER_CHANGED_REVIEW')) {
+          addManualReview({
+            review_type:        'ORDER_CHANGED_REVIEW',
+            severity:           'HIGH',
+            toever_order_no:    orderNo,
+            run_id,
+            error_message:      '같은 주문번호인데 수취인/주소/상품/수량 중 하나가 변경됨',
+            recommended_action: '기존 주문과 신규 수집 주문을 비교하여 수동 확인 필요',
+          })
+        }
       }
       continue
     }

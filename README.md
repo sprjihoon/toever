@@ -216,3 +216,30 @@ npm run build:dir
 ## 저장 경로 설정
 
 저장 경로는 **하드코딩되지 않습니다.** 최초 실행 마법사 또는 설정 메뉴에서 사용자가 직접 지정합니다. 기본값은 `C:\Users\{사용자}\Documents\SpringToeverOps`이며, 변경 후 앱 재시작이 필요합니다.
+
+## 심층 코드 검토 결과 (2026-07-08)
+
+심층 분석에서 발견된 47개 이슈 중 Critical/High 우선순위 항목 수정 완료:
+
+### 수정된 버그 목록
+
+| 파일 | 분류 | 수정 내용 |
+|------|------|-----------|
+| storage.ts | Critical | getKSTDateString() 유틸리티 추가. UTC 	oISOString() 대신 KST 기준 날짜 반환 (00:00~08:59 KST에서 전날 날짜 반환되는 버그 수정) |
+| storage.ts | Critical | DEFAULT_BASE = 'D:\\SpringToeverOps' 하드코딩 제거, 초기값 ''로 변경 |
+| duplicateFilter.ts | Critical | EZADMIN_BATCH_CANCELLED 처리 로직 추가: 동일 내용이면 재출고, 변경이면 수동검토로 분류 |
+| duplicateFilter.ts | Medium | ORDER_CHANGED_REVIEW 수동검토 항목 중복 삽입 방지 (hasOpenReview 체크) |
+| epositories.ts | Critical | insertOrderItems: INSERT OR REPLACE → delete-then-insert로 변경해 누적 중복행 방지 |
+| epositories.ts | Medium | hasOpenReview() 함수 추가 (같은 주문+타입의 OPEN 리뷰 중복 삽입 방지) |
+| ezadminUploadBuilder.ts | Critical | 파일아티팩트 저장 + 배치 생성 + 상태변경을 단일 SQLite 트랜잭션으로 래핑 |
+| scheduler.ts | Critical | 	oday() UTC → KST getKSTDateString() 교체; 스케줄러 콜백 async 에러핸들링 추가; 잘못된 시간 형식 유효성 검사 |
+| handlers.ts | Critical | 
+eedsRestart 로직: prevStoragePath 비교 → getBasePath() 비교로 수정 (첫 실행 시 경로 설정이 재시작 없이 적용되던 버그 수정) |
+| orchestrator.ts | Critical | existingRun.status === 'RUNNING' 처리: 앱 비정상 종료 후 재시작 시 UNIQUE 제약 위반 수정 |
+| Dashboard.tsx | Critical | 	oday() UTC → KST 	odayKST() 교체; usiness_date를 	oday() 대신 dateFrom(사용자 선택 날짜)으로 수정; 날짜 역순 유효성 검사 추가 |
+
+### 아키텍처 원칙 (재확인)
+- 모든 날짜 관련 로직: getKSTDateString() 사용 (UTC 금지)
+- DB 상태 변경이 포함된 로직: 반드시 트랜잭션 사용
+- 수동검토 삽입 전: hasOpenReview() 체크로 중복 방지
+- 배치 취소 주문: 동일 내용이면 재출고 허용, 변경이면 수동검토

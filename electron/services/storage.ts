@@ -61,8 +61,16 @@ export function saveRawFile(
 }
 
 export function buildDatePrefix(date?: string): string {
-  const d = date ?? new Date().toISOString().slice(0, 10)
+  const d = date ?? getKSTDateString()
   return d.replace(/-/g, '')
+}
+
+/**
+ * 한국 표준시(KST = UTC+9) 기준 오늘 날짜를 'YYYY-MM-DD' 형식으로 반환한다.
+ * UTC 기준 toISOString()을 사용하면 00:00~08:59 KST 구간에 전날 날짜가 반환되는 버그가 있다.
+ */
+export function getKSTDateString(): string {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
 }
 
 export function uniqueFilename(prefix: string, ext: string): string {
