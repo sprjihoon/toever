@@ -22,8 +22,11 @@ export function detectFileFormat(filePath: string): FileFormat {
     return 'XLSX'
   }
 
-  // HTML table based xls - read first 512 bytes as text
-  const sample = fs.readFileSync(filePath).slice(0, 512)
+  // HTML table based xls - read first 512 bytes as text (재파일 읽기 최소화)
+  const fd2 = fs.openSync(filePath, 'r')
+  const sample = Buffer.alloc(512)
+  fs.readSync(fd2, sample, 0, 512, 0)
+  fs.closeSync(fd2)
   const text = sample.toString('binary').toLowerCase()
   if (
     text.includes('<html') ||

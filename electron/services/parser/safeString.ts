@@ -48,24 +48,5 @@ export function isValidInvoiceNo(value: string): boolean {
   return true
 }
 
-export function computeOrderHash(data: {
-  receiver_name: string
-  receiver_phone: string
-  receiver_address: string
-  product_name: string
-  option_name: string | null
-  quantity: number
-  delivery_message: string | null
-}): string {
-  const { createHash } = require('crypto')
-  const str = [
-    data.receiver_name,
-    data.receiver_phone,
-    data.receiver_address,
-    data.product_name,
-    data.option_name ?? '',
-    String(data.quantity),
-    data.delivery_message ?? '',
-  ].join('|')
-  return createHash('sha256').update(str, 'utf8').digest('hex').slice(0, 16)
-}
+// computeOrderHash는 toeverOrderParser.ts에서 export됩니다.
+// 이 파일에서는 중복 정의하지 않습니다.

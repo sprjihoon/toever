@@ -5,43 +5,53 @@ const STATUS_LABELS: Record<string, string> = {
   NEW_SHIPMENT_TARGET:     '?? ?? ??',
   DUPLICATE_SKIPPED:       '?? ???',
   ORDER_CHANGED_REVIEW:    '?? ??',
-  EXPORTED_TO_EZADMIN:     '????? ???',
-  INVOICE_IMPORTED:        '?? ???',
+  COLLECTED:               '???',
+  EXPORTED_TO_EZADMIN:     '????? ??',
+  INVOICE_IMPORTED:        '?? ??',
   TOEVER_INVOICE_READY:    '??? ??',
-  TOEVER_INVOICE_UPLOADED: '??? ??? ??',
-  DISPATCH_DONE:           '?? ??',
+  TOEVER_INVOICE_UPLOADED: '??? ?? ??',
+  STOREOUT_INSTRUCTED:     '???? ??',
+  MANUAL_REVIEW:           '????',
   ERROR:                   '??',
+  CANCELLED:               '??',
+  ON_HOLD:                 '??',
+  RETURN_REQUESTED:        '????',
 }
 
 const STATUS_COLORS: Record<string, string> = {
   NEW_SHIPMENT_TARGET:     '#22c55e',
   DUPLICATE_SKIPPED:       '#475569',
   ORDER_CHANGED_REVIEW:    '#f59e0b',
+  COLLECTED:               '#64748b',
   EXPORTED_TO_EZADMIN:     '#3b82f6',
   INVOICE_IMPORTED:        '#06b6d4',
   TOEVER_INVOICE_READY:    '#8b5cf6',
   TOEVER_INVOICE_UPLOADED: '#a855f7',
-  DISPATCH_DONE:           '#64748b',
+  STOREOUT_INSTRUCTED:     '#10b981',
+  MANUAL_REVIEW:           '#f59e0b',
   ERROR:                   '#ef4444',
+  CANCELLED:               '#334155',
+  ON_HOLD:                 '#78716c',
+  RETURN_REQUESTED:        '#dc2626',
 }
 
 interface OrderDetail {
   header: OrderHeader
   items: OrderItem[]
   invoiceEvents: InvoiceEvent[]
-  reviews: ManualReviewItem[]
+  manualReviews: ManualReviewItem[]
 }
 
 export default function OrderList() {
-  const [keyword, setKeyword]     = useState('')
-  const [status, setStatus]       = useState('')
-  const [dateFrom, setDateFrom]   = useState('')
-  const [dateTo, setDateTo]       = useState('')
-  const [page, setPage]           = useState(1)
-  const [orders, setOrders]       = useState<OrderHeader[]>([])
-  const [total, setTotal]         = useState(0)
-  const [loading, setLoading]     = useState(false)
-  const [selected, setSelected]   = useState<OrderDetail | null>(null)
+  const [keyword, setKeyword]   = useState('')
+  const [status, setStatus]     = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo]     = useState('')
+  const [page, setPage]         = useState(1)
+  const [orders, setOrders]     = useState<OrderHeader[]>([])
+  const [total, setTotal]       = useState(0)
+  const [loading, setLoading]   = useState(false)
+  const [selected, setSelected] = useState<OrderDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
 
   const PAGE_SIZE = 20
@@ -52,11 +62,11 @@ export default function OrderList() {
     setLoading(true)
     try {
       const result = await api.orders.search({
-        keyword: keyword || undefined,
-        status: status || undefined,
+        keyword:   keyword || undefined,
+        status:    status  || undefined,
         date_from: dateFrom || undefined,
-        date_to: dateTo || undefined,
-        page: p,
+        date_to:   dateTo   || undefined,
+        page:      p,
         page_size: PAGE_SIZE,
       })
       if (result.success && result.data) {
@@ -92,6 +102,7 @@ export default function OrderList() {
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
       {/* ?? ?? */}
       <div style={{ width: 520, borderRight: '1px solid #1e293b', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
         {/* ?? ?? */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <h1 style={{ fontSize: 18, fontWeight: 700, color: '#f1f5f9' }}>?? ??</h1>
@@ -174,7 +185,7 @@ export default function OrderList() {
       {/* ?? ?? */}
       <div style={{ flex: 1, padding: 24, overflowY: 'auto' }}>
         {detailLoading ? (
-          <div style={{ color: '#64748b', fontSize: 13 }}>?? ?? ?? ?...</div>
+          <div style={{ color: '#64748b', fontSize: 13 }}>?? ?? ???? ?...</div>
         ) : !selected ? (
           <div style={{ color: '#475569', fontSize: 13, paddingTop: 40, textAlign: 'center' }}>
             ??? ???? ?? ??? ?????.
@@ -252,13 +263,14 @@ export default function OrderList() {
             )}
 
             {/* ?? ?? ?? */}
-            {selected.reviews.length > 0 && (
+            {selected.manualReviews.length > 0 && (
               <div className="card" style={{ border: '1px solid rgba(245,158,11,0.2)' }}>
                 <div style={{ fontWeight: 600, color: '#fde68a', marginBottom: 10, fontSize: 13 }}>?? ?? ??</div>
-                {selected.reviews.map(rev => (
+                {selected.manualReviews.map(rev => (
                   <div key={rev.id} style={{ padding: '6px 0', borderBottom: '1px solid #1e293b', fontSize: 12 }}>
-                    <div style={{ color: '#fde68a' }}>{rev.review_type} ? {rev.status}</div>
-                    {rev.memo && <div style={{ color: '#94a3b8', marginTop: 2 }}>{rev.memo}</div>}
+                    <div style={{ color: '#fde68a' }}>{rev.review_type} · {rev.status}</div>
+                    {rev.error_message && <div style={{ color: '#94a3b8', marginTop: 2, fontSize: 11 }}>{rev.error_message}</div>}
+                    {rev.memo && <div style={{ color: '#64748b', marginTop: 2 }}>{rev.memo}</div>}
                   </div>
                 ))}
               </div>

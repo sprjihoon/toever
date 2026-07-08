@@ -102,14 +102,16 @@ function extractCells(trContent: string): string[] {
     const attrs = tdMatch[1]
     const rawContent = tdMatch[2]
 
-    // HTML 태그 제거
+    // HTML 태그 제거 및 엔티티 디코딩
     const text = rawContent
       .replace(/<[^>]+>/g, '')
       .replace(/&amp;/g, '&')
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')
-      .replace(/&nbsp;/g, ' ')
+      .replace(/&quot;/g, '"')
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
       .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+      .replace(/&nbsp;/g, ' ')
       .trim()
 
     cells.push(text)
