@@ -26,7 +26,15 @@ export interface ParsedTable {
  */
 export function detectHtmlEncoding(buf: Buffer): string {
   const sample = buf.slice(0, 1024).toString('binary').toLowerCase()
-  if (sample.includes('charset=utf-8') || sample.includes('charset=utf8')) return 'utf8'
+  // charset 속성 값은 따옴표 있는/없는 형태 모두 처리
+  if (
+    sample.includes('charset=utf-8') ||
+    sample.includes('charset=utf8') ||
+    sample.includes('charset="utf-8"') ||
+    sample.includes("charset='utf-8'") ||
+    sample.includes('charset="utf8"') ||
+    sample.includes("charset='utf8'")
+  ) return 'utf8'
   if (sample.includes('ksc5601') || sample.includes('euc-kr') || sample.includes('ks_c_5601')) return 'cp949'
   // 기본값: 투에버 파일은 cp949
   return 'cp949'

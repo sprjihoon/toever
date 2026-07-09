@@ -1,0 +1,32 @@
+<html>
+<head><meta charset=utf-8></head>
+<body>
+<table>
+<tr>
+  <th>주문번호</th><th>수령자명</th><th>상품명</th><th>옵션</th>
+  <th>수량</th><th>연락처</th><th>주소</th><th>배송메세지</th>
+  <th>택배사</th><th>송장번호</th>
+</tr>
+<tr>
+  <td x:str>0100012026070800001</td><td>홍길동</td><td>스프링 텀블러 500ml</td><td>블랙</td>
+  <td>2</td><td>010-1234-5678</td><td>서울시 강남구 테헤란로 123</td><td>문앞에 두세요</td>
+  <td></td><td></td>
+</tr>
+<tr>
+  <td x:str>0100012026070800001</td><td>홍길동</td><td>스프링 머그컵 350ml</td><td>화이트</td>
+  <td>1</td><td>010-1234-5678</td><td>서울시 강남구 테헤란로 123</td><td>문앞에 두세요</td>
+  <td></td><td></td>
+</tr>
+<tr>
+  <td x:str>0100012026070800002</td><td>김철수</td><td>스프링 보온병 1L</td><td>레드</td>
+  <td>1</td><td>010-9876-5432</td><td>경기도 성남시 분당구 판교로 456</td><td>경비실에 맡겨주세요</td>
+  <td></td><td></td>
+</tr>
+<tr>
+  <td x:str>0100012026070800003</td><td>이영희</td><td>스프링 컵홀더</td><td>네이비</td>
+  <td>3</td><td>010-5555-6666</td><td>부산시 해운대구 마린시티로 789</td><td></td>
+  <td></td><td></td>
+</tr>
+</table>
+</body>
+</html>
