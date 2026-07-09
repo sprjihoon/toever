@@ -43,10 +43,11 @@ export function isChromiumInstalled(): boolean {
     const chromiumDir = entries.find(e => e.startsWith('chromium-'))
     if (!chromiumDir) return false
 
-    // 실제 실행 파일 존재 여부까지 확인
+    // 실제 실행 파일 존재 여부까지 확인 (chrome-win64 / chrome-win 모두 허용)
     const base = path.join(browsersPath, chromiumDir)
     const candidates = [
-      path.join(base, 'chrome-win', 'chrome.exe'),      // Windows
+      path.join(base, 'chrome-win64', 'chrome.exe'),    // Windows (최신)
+      path.join(base, 'chrome-win', 'chrome.exe'),       // Windows (구버전)
       path.join(base, 'chrome-linux', 'chrome'),         // Linux
       path.join(base, 'chrome-mac', 'Chromium.app', 'Contents', 'MacOS', 'Chromium'), // macOS
     ]
