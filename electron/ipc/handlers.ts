@@ -14,8 +14,11 @@ import { getKSTDateString } from '../services/storage'
 import {
   collectOrders, generateEzadminUploadFile,
   importEzadminInvoice, uploadToeverInvoiceFile,
+  previewToeverInvoiceUpload,
   isLocked,
 } from '../services/toever/orchestrator'
+import { getOrdersForStoreout } from '../services/db/repositories'
+import { processStoreoutInstruction } from '../services/toever/browser'
 import {
   runBackup, getRunningAutomations, isBackupPathAvailable,
   getLastBackup,
@@ -227,7 +230,33 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ??? ?? ???
   // ============================================================
 
-  ipcMain.handle('invoice:uploadToever', async () => {
+  /** ??? ?? ?? ?? ?? (???? ??, ?? ?? ??) */
+  ipcMain.handle('invoice:previewUpload', async () => {
+    try {
+      const preview = previewToeverInvoiceUpload()
+      return { success: true, data: preview }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
+  /**
+   * ??? ?? ??? ??
+   * - confirmed=true ?? ???? CONFIRM_REQUIRED ?? ?? (?? ? ?)
+   * - dryRun=true(???): uploadBtn ?? ?? ?? ????? ??
+   */
+  ipcMain.handle('invoice:uploadToever', async (_e, params?: {
+    confirmed?: boolean
+    dryRun?: boolean
+  }) => {
+    if (!params?.confirmed) {
+      return {
+        success: false,
+        error: 'CONFIRM_REQUIRED',
+        message: '??? ??? ?????. confirmed:true ? ?????.',
+      }
+    }
+
     const settings = getAllSettings()
     const password = loadPassword()
     if (!settings['toever_id'] || !password) {
@@ -236,20 +265,122 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     if (isLocked('upload_toever_invoice')) {
       return { success: false, error: '?? ?? ????.' }
     }
-    const today = getKSTDateString()
-    const run = createRun('UPLOAD_TOEVER_INVOICE', today, `upload_invoice:${today}:${Date.now()}`, 'manual')
+
+    const dryRun = params?.dryRun ?? false
+    const today  = getKSTDateString()
+    const run    = createRun('UPLOAD_TOEVER_INVOICE', today,
+      `upload_invoice:${today}:${Date.now()}:${dryRun ? 'dry' : 'real'}`, 'manual')
     try {
       const result = await uploadToeverInvoiceFile({
-        toever_id: settings['toever_id'],
+        toever_id:     settings['toever_id'],
         toever_password: password,
-        run_id: run.id,
+        run_id:        run.id,
+        dryRun,
         emit: (event, data) => {
           mainWindow?.webContents.send('automation:event', { event, data })
         },
       })
-      updateRunStatus(run.id, result.success ? 'SUCCESS' : 'FAILED',
-        result.success ? `${result.uploaded}? ???` : result.errors.join('; '))
+      const summary = result.dryRun
+        ? 'DRY-RUN ?? (??? ? ?)'
+        : result.success
+          ? `${result.uploaded}? ??? ??`
+          : result.errors.join('; ')
+      updateRunStatus(run.id, result.success ? 'SUCCESS' : 'FAILED', summary)
       return { success: result.success, data: result }
+    } catch (e) {
+      updateRunStatus(run.id, 'FAILED', String(e))
+      return { success: false, error: String(e) }
+    }
+  })
+
+  // ============================================================
+  // ??????
+  // ============================================================
+
+  /** ?????? ?? ???? ?? ?? ?? (???? ??) */
+  ipcMain.handle('storeout:preview', async () => {
+    try {
+      const orders = getOrdersForStoreout()
+      return {
+        success: true,
+        data: orders.map(o => ({
+          order_no:   o.toever_order_no,
+          invoice_no: o.latest_invoice_no ?? '',
+          recipient:  o.receiver_name     ?? '',
+        })),
+      }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
+  /**
+   * ?????? ??
+   * - confirmed=true ?? ???? CONFIRM_REQUIRED ??
+   * - dryRun=true(???): ???? ??/submit ?? ?? ??? ??
+   * - ?? ??? ? ?? ??? ?? ? ???? ? ?? (browser.ts ?? ??)
+   */
+  ipcMain.handle('storeout:execute', async (_e, params?: {
+    confirmed?: boolean
+    dryRun?: boolean
+  }) => {
+    if (!params?.confirmed) {
+      return {
+        success: false,
+        error: 'CONFIRM_REQUIRED',
+        message: '??? ??? ?????. confirmed:true ? ?????.',
+      }
+    }
+
+    const settings = getAllSettings()
+    const password = loadPassword()
+    if (!settings['toever_id'] || !password) {
+      return { success: false, error: '??? ID/????? ???? ?????.' }
+    }
+    if (isLocked('storeout_instruct')) {
+      return { success: false, error: '?? ?? ????.' }
+    }
+
+    const dryRun = params?.dryRun ?? false
+    const orders = getOrdersForStoreout()
+    if (orders.length === 0) {
+      return { success: false, error: '?????? ?? ??? ????.' }
+    }
+
+    const poNos  = orders.map(o => o.toever_order_no)
+    const today  = getKSTDateString()
+    const run    = createRun('STOREOUT_INSTRUCT', today,
+      `storeout:${today}:${Date.now()}:${dryRun ? 'dry' : 'real'}`, 'manual')
+
+    const { launchBrowser, loginToever, closeBrowser, processStoreoutInstruction: storeout } =
+      require('../services/toever/browser')
+
+    try {
+      const session = await launchBrowser(require('../services/storage').DIRS.generatedToeverInvoiceUpload())
+      const { page } = session
+      try {
+        const loginResult = await loginToever(page, settings['toever_id'], password, run.id)
+        if (!loginResult.success) {
+          updateRunStatus(run.id, 'FAILED', loginResult.error)
+          return { success: false, error: loginResult.error }
+        }
+
+        mainWindow?.webContents.send('automation:event', {
+          event: 'progress',
+          data: { step: dryRun ? '[DRY-RUN] ?????? ?? ?? ?...' : '?????? ?? ?...' },
+        })
+
+        const result = await processStoreoutInstruction(page, poNos, run.id, dryRun)
+        const summary = result.dryRun
+          ? `DRY-RUN: ${result.processedPoNos.length}? ?? ??`
+          : result.success
+            ? `${result.processedPoNos.length}? ??`
+            : `??/???: ${[...result.failedPoNos, ...result.unclearPoNos].join(', ')}`
+        updateRunStatus(run.id, result.success ? 'SUCCESS' : 'PARTIAL', summary)
+        return { success: result.success, data: result }
+      } finally {
+        await closeBrowser()
+      }
     } catch (e) {
       updateRunStatus(run.id, 'FAILED', String(e))
       return { success: false, error: String(e) }

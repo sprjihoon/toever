@@ -168,6 +168,15 @@ export function getOrdersForToeverInvoiceUpload(): OrderHeader[] {
   `).all() as OrderHeader[]
 }
 
+/** 출고작업지시 대상: 송장 업로드 완료 주문 */
+export function getOrdersForStoreout(): OrderHeader[] {
+  return getDb().prepare(`
+    SELECT * FROM order_header
+    WHERE status = 'TOEVER_INVOICE_UPLOADED'
+    ORDER BY toever_order_no
+  `).all() as OrderHeader[]
+}
+
 export function searchOrders(params: SearchOrdersParams): { orders: OrderHeader[]; total: number } {
   const db = getDb()
   const conditions: string[] = []

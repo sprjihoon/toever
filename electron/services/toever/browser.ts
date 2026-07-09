@@ -2,7 +2,7 @@ import { chromium, Browser, BrowserContext, Page } from 'playwright'
 import path from 'path'
 import fs from 'fs'
 import { screenshotPath, DIRS, sha256OfBuffer } from '../storage'
-import { logToeverAction, saveFileArtifact } from '../db/repositories'
+import { logToeverAction, saveFileArtifact, addManualReview } from '../db/repositories'
 
 const TOEVER_BASE          = 'https://support.toever.co.kr'
 const LOGIN_URL            = `${TOEVER_BASE}/Login/login.jsp`
@@ -280,13 +280,21 @@ export async function downloadToeverOrders(
  * 투에버 송장 파일 업로드
  * - UPLOAD_TOKEN은 반드시 페이지에서 읽어서 사용 (고정값 금지)
  * - 상태 변경 작업이므로 재시도 최대 1회
+ * - dryRun=true: 파일 첨부까지만, uploadBtn 클릭 안 함
  */
 export async function uploadToeverInvoice(
   p: Page,
   invoiceFilePath: string,
-  run_id?: number
-): Promise<{ success: boolean; resultMessage?: string; screenshotPath?: string; error?: string }> {
-  const MAX_ATTEMPTS = 2
+  run_id?: number,
+  dryRun = false,
+): Promise<{
+  success: boolean
+  dryRun?: boolean
+  resultMessage?: string
+  screenshotPath?: string
+  error?: string
+}> {
+  const MAX_ATTEMPTS = dryRun ? 1 : 2
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
@@ -323,6 +331,20 @@ export async function uploadToeverInvoice(
       await p.waitForTimeout(500)
 
       const beforeSs = await takeScreenshot(p, `invoice_upload_attempt${attempt}_before`)
+
+      // Dry-run: uploadBtn 클릭 없이 여기서 종료
+      if (dryRun) {
+        logToeverAction({
+          run_id,
+          action_type: 'INVOICE_UPLOAD',
+          target_url: INVOICE_UPLOAD_URL,
+          payload: JSON.stringify({ filePath: invoiceFilePath, dryRun: true }),
+          result_status: 'SKIP',
+          result_message: 'DRY_RUN — uploadBtn 클릭 안 함',
+          screenshot_path: beforeSs,
+        })
+        return { success: true, dryRun: true, resultMessage: 'DRY_RUN', screenshotPath: beforeSs }
+      }
 
       // 업로드 버튼 클릭
       await Promise.all([
@@ -390,16 +412,19 @@ export async function uploadToeverInvoice(
 
 /**
  * 출고작업지시 처리
- * - 실제 체크박스 클릭 방식 사용 (초기 구현)
+ * - 실제 체크박스 클릭 방식 사용
+ * - dryRun=true: 체크박스 선택/submit 없이 대상 발주번호 목록만 반환
  * - 자동 재시도 금지
- * - 결과 불명확 시 수동검토
+ * - 결과 불명확 시 수동검토 큐 등록
  */
 export async function processStoreoutInstruction(
   p: Page,
-  poNos: string[],  // 발주번호 목록
-  run_id?: number
+  poNos: string[],
+  run_id?: number,
+  dryRun = false,
 ): Promise<{
   success: boolean
+  dryRun?: boolean
   processedPoNos: string[]
   failedPoNos: string[]
   unclearPoNos: string[]
@@ -425,7 +450,7 @@ export async function processStoreoutInstruction(
       const poNo = parts[4] ?? ''  // 인덱스 4 = 발주번호
 
       if (poNos.includes(poNo)) {
-        await checkbox.click()
+        if (!dryRun) await checkbox.click()
         processedPoNos.push(poNo)
       }
     }
@@ -433,10 +458,33 @@ export async function processStoreoutInstruction(
     if (processedPoNos.length === 0) {
       return {
         success: false,
+        dryRun,
         processedPoNos: [],
         failedPoNos: poNos,
         unclearPoNos: [],
         error: '체크박스에서 발주번호를 찾지 못했습니다.',
+      }
+    }
+
+    // Dry-run: 체크박스 클릭/submit 없이 대상 목록만 반환
+    if (dryRun) {
+      const beforeSs = await takeScreenshot(p, 'storeout_dryrun_preview')
+      logToeverAction({
+        run_id,
+        action_type: 'STOREOUT_INSTRUCT',
+        target_url: ORDER_LIST_URL,
+        payload: JSON.stringify({ poNos: processedPoNos, dryRun: true }),
+        result_status: 'SKIP',
+        result_message: `DRY_RUN — ${processedPoNos.length}건 대상 확인, submit 안 함`,
+        screenshot_path: beforeSs,
+      })
+      return {
+        success: true,
+        dryRun: true,
+        processedPoNos,
+        failedPoNos: poNos.filter(p => !processedPoNos.includes(p)),
+        unclearPoNos: [],
+        screenshotPath: beforeSs,
       }
     }
 
@@ -466,6 +514,14 @@ export async function processStoreoutInstruction(
 
     if (isUnclear) {
       unclearPoNos.push(...processedPoNos)
+      // 자동 재시도 금지 — 수동검토 큐에 등록
+      addManualReview({
+        review_type: 'STOREOUT_UNCLEAR',
+        severity: 'HIGH',
+        run_id,
+        error_message: `출고작업지시 결과 불명확: ${processedPoNos.join(', ')}`,
+        recommended_action: '투에버 발주내역 화면에서 출고작업지시 상태 수동 확인 후 처리',
+      })
     }
 
     logToeverAction({

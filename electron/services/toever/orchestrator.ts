@@ -476,13 +476,31 @@ export async function importEzadminInvoice(params: {
 // 투에버 송장 업로드
 // ============================================================
 
+/**
+ * 송장 업로드 대상 목록만 반환 (브라우저 없음, 상태 변경 없음)
+ */
+export function previewToeverInvoiceUpload(): {
+  order_no: string
+  invoice_no: string
+  recipient: string
+}[] {
+  return getOrdersForToeverInvoiceUpload().map(o => ({
+    order_no:   o.toever_order_no,
+    invoice_no: o.latest_invoice_no ?? '',
+    recipient:  o.receiver_name     ?? '',
+  }))
+}
+
 export async function uploadToeverInvoiceFile(params: {
   toever_id: string
   toever_password: string
   run_id?: number
+  /** true = 파일 생성까지만, uploadBtn 클릭 안 함 */
+  dryRun?: boolean
   emit?: (event: string, data?: unknown) => void
 }): Promise<{
   success: boolean
+  dryRun?: boolean
   uploaded: number
   failed: number
   errors: string[]
@@ -518,10 +536,16 @@ export async function uploadToeverInvoiceFile(params: {
       }
 
       // 송장 파일 업로드
-      params.emit?.('progress', { step: '송장 파일 업로드 중...' })
-      const uploadResult = await uploadToeverInvoice(page, filePath, params.run_id)
+      params.emit?.('progress', { step: params.dryRun ? '[DRY-RUN] 파일 첨부 확인 중...' : '송장 파일 업로드 중...' })
+      const uploadResult = await uploadToeverInvoice(page, filePath, params.run_id, params.dryRun ?? false)
+
+      // Dry-run: 파일 첨부 확인만, 상태 변경 없음
+      if (uploadResult.dryRun) {
+        return { success: true, dryRun: true, uploaded: 0, failed: 0, errors: [] }
+      }
 
       if (!uploadResult.success) {
+        // 결과 불명확 포함 — 자동 재시도 금지, 수동검토 등록
         addManualReview({
           review_type: 'UPLOAD_PARTIAL_FAIL',
           severity: 'HIGH',
