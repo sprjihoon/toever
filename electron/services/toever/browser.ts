@@ -1,13 +1,14 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright'
 import path from 'path'
 import fs from 'fs'
-import { screenshotPath, DIRS } from '../storage'
-import { logToeverAction } from '../db/repositories'
+import { screenshotPath, DIRS, sha256OfBuffer } from '../storage'
+import { logToeverAction, saveFileArtifact } from '../db/repositories'
 
 const TOEVER_BASE          = 'https://support.toever.co.kr'
 const LOGIN_URL            = `${TOEVER_BASE}/Login/login.jsp`
 const ORDER_LIST_URL       = `${TOEVER_BASE}/VendorMgr/PoState/orderDtlP.jsp`
 const INVOICE_UPLOAD_URL   = `${TOEVER_BASE}/VendorMgr/PoState/uploadInvoice.jsp`
+const REPORT_HTML_URL      = `${TOEVER_BASE}/VendorMgr/PoState/rptSalePaperPrintP_HTML.jsp`
 
 // 로그인 실패 문자열
 const LOGIN_FAIL_MESSAGES  = [
@@ -497,3 +498,234 @@ export async function processStoreoutInstruction(
 }
 
 export { TOEVER_BASE, ORDER_LIST_URL, INVOICE_UPLOAD_URL }
+
+// ============================================================
+// PDF 출력 저장
+//
+// 안전 조건:
+// - GET 요청 + page.pdf() 만 수행 (상태 변경 없음)
+// - 송장업로드 / 출고작업지시 / form submit 금지
+// - 실패해도 주문 import/엑셀 생성 흐름 중단 안 함
+// ============================================================
+
+export interface PdfReportParams {
+  /** 현재 로그인된 Headed 브라우저 context (쿠키 원본) */
+  context:  BrowserContext
+  /** 조회 시작일 YYYY-MM-DD */
+  dateFrom: string
+  /** 조회 종료일 YYYY-MM-DD */
+  dateTo:   string
+  run_id?:  number
+}
+
+export interface PdfReportResult {
+  success:        boolean
+  filePath?:      string
+  size_bytes?:    number
+  skipped?:       boolean
+  skip_reason?:   string
+  screenshotPath?: string
+  error?:         string
+}
+
+/**
+ * 투에버 발주내역 출력 페이지를 PDF로 저장한다.
+ *
+ * 흐름:
+ *  1. 로그인된 context 에서 쿠키 복사
+ *  2. 발주내역 페이지에서 getReportCommonParams() 호출 → p_order_no/p_order_noTo 추출
+ *  3. Headless 브라우저 + 복사된 쿠키로 rptSalePaperPrintP_HTML.jsp 접근
+ *  4. page.pdf() 로 저장
+ *  5. artifact DB 등록
+ */
+export async function savePdfReport(params: PdfReportParams): Promise<PdfReportResult> {
+  const { context, dateFrom, dateTo, run_id } = params
+
+  let headlessBrowser: Browser | null = null
+
+  try {
+    // ── Step 1: 발주내역 페이지에서 report 파라미터 추출 ──────────
+    //   window.open 을 가로채서 실제 URL 캡처 (조회 결과 기반 동적 파라미터)
+    const headedPage = context.pages().find(p => p.url().includes('orderDtlP')) ?? null
+
+    let reportUrl: string | null = null
+
+    if (headedPage) {
+      reportUrl = await headedPage.evaluate(() => {
+        let captured: string | null = null
+        const origOpen = window.open.bind(window)
+        // window.open 을 일시적으로 가로채기 (창 안 열고 URL만 캡처)
+        ;(window as any).open = (url: string) => { captured = url; return null }
+        try {
+          if (typeof (window as any).showReport_HTML === 'function') {
+            ;(window as any).showReport_HTML()
+          }
+        } catch { /* 무시 */ }
+        ;(window as any).open = origOpen
+        return captured
+      }).catch(() => null)
+    }
+
+    // 동적 추출 실패 시 → 발주내역 페이지에서 직접 파라미터 수집
+    if (!reportUrl) {
+      if (headedPage) {
+        const p = await headedPage.evaluate(() => {
+          if (typeof (window as any).getReportCommonParams === 'function') {
+            return (window as any).getReportCommonParams()
+          }
+          return null
+        }).catch(() => null)
+
+        if (p && p.p_order_no && p.p_order_noTo) {
+          const qs = new URLSearchParams({
+            p_xml_file:     '/SALE/vendor_sale_paper_new.ozr',
+            p_company_cd:   p.p_company_cd  ?? '01',
+            p_merchant_cd:  p.p_merchant_cd ?? '0001',
+            p_entr_no:      p.p_entr_no     ?? '',
+            p_order_dt:     dateFrom.replace(/-/g, ''),
+            p_order_dtTo:   dateTo.replace(/-/g, ''),
+            p_storeout_sts: p.p_storeout_sts ?? '01',
+            p_order_no:     p.p_order_no,
+            p_order_noTo:   p.p_order_noTo,
+          })
+          reportUrl = `${REPORT_HTML_URL}?${qs.toString()}`
+        }
+      }
+    }
+
+    if (!reportUrl) {
+      const reason = '발주내역 페이지에서 발주번호 범위를 추출하지 못했습니다. (조회 결과가 없거나 페이지가 닫힘)'
+      logToeverAction({
+        run_id,
+        action_type: 'PDF_REPORT',
+        target_url:  REPORT_HTML_URL,
+        result_status: 'SKIP',
+        result_message: 'PDF_SKIPPED_NO_ORDER_RANGE',
+      })
+      return { success: false, skipped: true, skip_reason: reason }
+    }
+
+    // URL이 절대경로가 아니면 BASE 추가
+    if (!reportUrl.startsWith('http')) {
+      reportUrl = TOEVER_BASE + (reportUrl.startsWith('/') ? reportUrl : '/' + reportUrl)
+    }
+
+    // ── Step 2: 쿠키 복사 ────────────────────────────────────────
+    const cookies = await context.cookies()
+
+    // ── Step 3: Headless 브라우저로 PDF 저장 ─────────────────────
+    headlessBrowser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    })
+
+    const headlessCtx = await headlessBrowser.newContext({
+      locale:     'ko-KR',
+      timezoneId: 'Asia/Seoul',
+    })
+    await headlessCtx.addCookies(cookies)
+
+    const headlessPage = await headlessCtx.newPage()
+
+    // 출력 URL 접근 (GET 요청 — 상태 변경 없음)
+    await headlessPage.goto(reportUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+
+    // 네트워크 안정화 대기 (최대 10초)
+    await headlessPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
+    await headlessPage.waitForTimeout(1500)  // 렌더링 여유
+
+    // 로그인 리다이렉트 감지
+    const finalUrl = headlessPage.url()
+    const pageContent = await headlessPage.content()
+    if (finalUrl.includes('login') || finalUrl.includes('Login') || pageContent.includes('p_login_id')) {
+      const errSs = await headlessPage.screenshot({ path: screenshotPath('pdf_session_expired') }).catch(() => '')
+      return {
+        success: false,
+        error: '출력 페이지 접근 시 로그인 리다이렉트 (세션 만료)',
+        screenshotPath: errSs as string,
+      }
+    }
+
+    // PDF 저장 경로
+    const pdfDir = DIRS.pdfContracts()
+    if (!fs.existsSync(pdfDir)) fs.mkdirSync(pdfDir, { recursive: true })
+
+    const datePfx = dateFrom.replace(/-/g, '')
+    const ts      = Date.now()
+    const runSuffix = run_id != null ? `_run${run_id}` : `_${ts}`
+    const filename  = `${datePfx}_report${runSuffix}.pdf`
+    const filePath  = path.join(pdfDir, filename)
+
+    // ── Step 4: PDF 저장 ─────────────────────────────────────────
+    await headlessPage.pdf({
+      path:            filePath,
+      format:          'A4',
+      printBackground: true,
+      landscape:       true,
+      margin: { top: '8mm', bottom: '8mm', left: '5mm', right: '5mm' },
+    })
+
+    // ── Step 5: 파일 크기 확인 ───────────────────────────────────
+    if (!fs.existsSync(filePath)) {
+      return { success: false, error: 'PDF 파일이 생성되지 않았습니다.' }
+    }
+    const stat = fs.statSync(filePath)
+    if (stat.size === 0) {
+      fs.unlinkSync(filePath)  // 0바이트 파일 삭제
+      const errSs = await headlessPage.screenshot({ path: screenshotPath('pdf_empty') }).catch(() => '')
+      return {
+        success: false,
+        error: 'PDF 파일이 0바이트입니다. (렌더링 실패)',
+        screenshotPath: errSs as string,
+      }
+    }
+
+    // ── Step 6: artifact DB 등록 ─────────────────────────────────
+    try {
+      const buf = fs.readFileSync(filePath)
+      saveFileArtifact({
+        artifact_type:    'TOEVER_ORDER_PDF',
+        original_filename: filename,
+        stored_path:      filePath,
+        sha256:           sha256OfBuffer(buf),
+        size_bytes:       stat.size,
+        run_id:           run_id ?? null,
+      })
+    } catch { /* artifact 등록 실패는 무시 */ }
+
+    // ── Step 7: 성공 로그 ────────────────────────────────────────
+    logToeverAction({
+      run_id,
+      action_type:    'PDF_REPORT',
+      target_url:     reportUrl,
+      result_status:  'SUCCESS',
+      result_message: `${filename} (${(stat.size / 1024).toFixed(1)} KB)`,
+    })
+
+    return { success: true, filePath, size_bytes: stat.size }
+
+  } catch (e) {
+    // ── 실패 처리 (경고 로그만 — 흐름 중단 안 함) ────────────────
+    const errMsg = String(e)
+    let errSs = ''
+    try {
+      errSs = screenshotPath('pdf_report_error')
+      // headless page가 이미 닫혔을 수 있으므로 무시
+    } catch { /* 무시 */ }
+
+    logToeverAction({
+      run_id,
+      action_type:    'PDF_REPORT',
+      target_url:     REPORT_HTML_URL,
+      result_status:  'ERROR',
+      result_message: errMsg,
+      screenshot_path: errSs,
+    })
+
+    return { success: false, error: errMsg }
+  } finally {
+    if (headlessBrowser) {
+      await headlessBrowser.close().catch(() => {})
+    }
+  }
+}
