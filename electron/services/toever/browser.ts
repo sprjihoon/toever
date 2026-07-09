@@ -297,146 +297,153 @@ export async function uploadToeverInvoice(
   screenshotPath?: string
   error?: string
 }> {
-  const MAX_ATTEMPTS = dryRun ? 1 : 2
+  // ── 단 1회만 실행 (자동 재시도 없음) ─────────────────────────
+  // 판별 기준 (uploadOK.jsp 실제 확인 기준 2026-07-09):
+  //   성공>0  → SUCCESS
+  //   성공=0, 스킵=0 → TOEVER_UPLOAD_NO_ROWS (실패, 재시도 없음)
+  //   성공=0, 스킵>0 → 스킵 처리 (실패, 재시도 없음)
+  //   오류 문구 있음  → FAIL (실패, 재시도 없음)
+  //   파싱 불가       → UNCLEAR → manual_review_queue 등록
+  try {
+    // 실제 업로드 URL: /deliveryupload/deliveryListP.jsp
+    // (구 URL /VendorMgr/PoState/uploadInvoice.jsp 는 404 — 2026-07-09 확인)
+    await p.goto(INVOICE_UPLOAD_URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
+    await p.waitForTimeout(2000)
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    try {
-      // 실제 업로드 URL: /deliveryupload/deliveryListP.jsp
-      // (구 URL /VendorMgr/PoState/uploadInvoice.jsp 는 404 — 2026-07-09 확인)
-      await p.goto(INVOICE_UPLOAD_URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
-      await p.waitForTimeout(2000)
+    // deliveryListP.jsp 는 mainFrm 없이 단일 페이지로 로드됨
+    const targetFrame = p.frame({ name: 'mainFrm' })
+      ?? p.frames().find(f => f.url().includes('deliveryListP') || f.url().includes('deliveryupload'))
+      ?? p
 
-      // deliveryListP.jsp 는 mainFrm 없이 단일 페이지로 로드됨
-      const targetFrame = p.frame({ name: 'mainFrm' })
-        ?? p.frames().find(f => f.url().includes('deliveryListP') || f.url().includes('deliveryupload'))
-        ?? p
+    // 파일 input 대기 (페이지 로드 확인)
+    await targetFrame.waitForSelector('input#uploadFile', { timeout: 15000 })
 
-      // 파일 input 대기 (페이지 로드 확인)
-      await targetFrame.waitForSelector('input#uploadFile', { timeout: 15000 })
+    // UPLOAD_TOKEN 확인 (고정값 사용 금지)
+    const tokenEl = await targetFrame.$('input[name="UPLOAD_TOKEN"]').catch(() => null)
+    const token   = tokenEl
+      ? await targetFrame.$eval('input[name="UPLOAD_TOKEN"]', (el: HTMLInputElement) => el.value).catch(() => '')
+      : ''
 
-      // UPLOAD_TOKEN 확인 (고정값 사용 금지, 없으면 경고만 — 페이지에 따라 없을 수 있음)
-      const tokenEl = await targetFrame.$('input[name="UPLOAD_TOKEN"]').catch(() => null)
-      const token   = tokenEl
-        ? await targetFrame.$eval('input[name="UPLOAD_TOKEN"]', (el: HTMLInputElement) => el.value).catch(() => '')
-        : ''
-
-      if (tokenEl && (!token || token.trim() === '')) {
-        const tokenErrSs = await takeScreenshot(p, 'upload_token_missing')
-        logToeverAction({
-          run_id,
-          action_type: 'INVOICE_UPLOAD',
-          result_status: 'FAIL',
-          result_message: 'UPLOAD_TOKEN이 없거나 비어있음',
-          screenshot_path: tokenErrSs,
-        })
-        return {
-          success: false,
-          error: 'UPLOAD_TOKEN이 없거나 비어있습니다.',
-          screenshotPath: tokenErrSs,
-        }
-      }
-
-      // 파일 첨부 (accept="application/vnd.ms-excel,.xls")
-      await targetFrame.setInputFiles('input#uploadFile', invoiceFilePath)
-      await p.waitForTimeout(500)
-
-      const beforeSs = await takeScreenshot(p, `invoice_upload_attempt${attempt}_before`)
-
-      // Dry-run: uploadBtn 클릭 없이 여기서 종료
-      if (dryRun) {
-        logToeverAction({
-          run_id,
-          action_type: 'INVOICE_UPLOAD',
-          target_url: INVOICE_UPLOAD_URL,
-          payload: JSON.stringify({ filePath: invoiceFilePath, dryRun: true, token: token?.slice(0, 10) }),
-          result_status: 'SKIP',
-          result_message: 'DRY_RUN — uploadBtn 클릭 안 함',
-          screenshot_path: beforeSs,
-        })
-        return { success: true, dryRun: true, resultMessage: 'DRY_RUN', screenshotPath: beforeSs }
-      }
-
-      // 업로드 버튼 클릭 (form action: uploadOK.jsp)
-      await Promise.all([
-        p.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}),
-        targetFrame.click('input#uploadBtn'),
-      ])
-
-      await p.waitForTimeout(3000)
-      const afterSs = await takeScreenshot(p, `invoice_upload_attempt${attempt}_result`)
-
-      const resultContent = await p.content()
-
-      // 투에버 업로드 결과 형식 (uploadOK.jsp 확인 기준 2026-07-09):
-      //   "완료: 정상 처리되었습니다. 성공=N, 스킵=N"
-      //   성공=0 이면 실제로 처리된 건 없음 → 실패로 간주
-      const successCountMatch = resultContent.match(/성공=(\d+)/)
-      const successCount = successCountMatch ? parseInt(successCountMatch[1], 10) : -1
-
-      // 성공=N (N > 0) 이어야 실제 성공
-      const isSuccess = successCount > 0
-
-      // 스킵 건수 파싱
-      const skipCountMatch = resultContent.match(/스킵=(\d+)/)
-      const skipCount = skipCountMatch ? parseInt(skipCountMatch[1], 10) : 0
-
-      const resultSummary = successCountMatch
-        ? `성공=${successCount}, 스킵=${skipCount}`
-        : `attempt=${attempt} (성공 건수 파싱 불가)`
-
+    if (tokenEl && (!token || token.trim() === '')) {
+      const tokenErrSs = await takeScreenshot(p, 'upload_token_missing')
       logToeverAction({
         run_id,
-        action_type: 'INVOICE_UPLOAD',
-        target_url: INVOICE_UPLOAD_URL,
-        payload: JSON.stringify({ filePath: invoiceFilePath, token: (token ?? '').slice(0, 10) + '...' }),
-        result_status: isSuccess ? 'SUCCESS' : (successCount === 0 ? 'SKIP' : 'FAIL'),
-        result_message: resultSummary,
-        screenshot_path: afterSs,
+        action_type:    'INVOICE_UPLOAD',
+        result_status:  'FAIL',
+        result_message: 'UPLOAD_TOKEN이 없거나 비어있음',
+        screenshot_path: tokenErrSs,
       })
-
-      if (isSuccess) {
-        return {
-          success: true,
-          resultMessage: `업로드 완료 (${resultSummary})`,
-          screenshotPath: afterSs,
-        }
-      }
-
-      // 성공=0 이면 재시도해도 의미 없음 — 즉시 실패 반환
-      if (successCount === 0) {
-        return {
-          success: false,
-          error: `업로드 성공 건 없음 (${resultSummary})`,
-          screenshotPath: afterSs,
-        }
-      }
-
-      if (attempt >= MAX_ATTEMPTS) {
-        return {
-          success: false,
-          error: `업로드 실패 — 성공 건수 파싱 불가 (attempt=${attempt})`,
-          screenshotPath: afterSs,
-        }
-      }
-
-      // 1회 재시도 전 대기
-      await p.waitForTimeout(3000)
-    } catch (e) {
-      const errSs = await takeScreenshot(p, `invoice_upload_error_attempt${attempt}`).catch(() => '')
-      if (attempt >= MAX_ATTEMPTS) {
-        logToeverAction({
-          run_id,
-          action_type: 'INVOICE_UPLOAD',
-          result_status: 'ERROR',
-          result_message: String(e),
-          screenshot_path: errSs,
-        })
-        return { success: false, error: String(e), screenshotPath: errSs }
-      }
+      return { success: false, error: 'UPLOAD_TOKEN이 없거나 비어있습니다.', screenshotPath: tokenErrSs }
     }
-  }
 
-  return { success: false, error: '최대 재시도 초과' }
+    // 파일 첨부 (accept="application/vnd.ms-excel,.xls")
+    await targetFrame.setInputFiles('input#uploadFile', invoiceFilePath)
+    await p.waitForTimeout(500)
+
+    const beforeSs = await takeScreenshot(p, 'invoice_upload_before')
+
+    // Dry-run: uploadBtn 클릭 없이 종료
+    if (dryRun) {
+      logToeverAction({
+        run_id,
+        action_type:    'INVOICE_UPLOAD',
+        target_url:     INVOICE_UPLOAD_URL,
+        payload:        JSON.stringify({ filePath: invoiceFilePath, dryRun: true, token: (token ?? '').slice(0, 10) }),
+        result_status:  'SKIP',
+        result_message: 'DRY_RUN — uploadBtn 클릭 안 함',
+        screenshot_path: beforeSs,
+      })
+      return { success: true, dryRun: true, resultMessage: 'DRY_RUN', screenshotPath: beforeSs }
+    }
+
+    // ── 업로드 버튼 클릭 (form action: uploadOK.jsp) ─────────────
+    await Promise.all([
+      p.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}),
+      targetFrame.click('input#uploadBtn'),
+    ])
+    await p.waitForTimeout(3000)
+
+    const afterSs      = await takeScreenshot(p, 'invoice_upload_result')
+    const resultContent = await p.content()
+
+    // ── 결과 판별 ─────────────────────────────────────────────────
+    // 1. 성공/스킵 건수 파싱
+    const successMatch = resultContent.match(/성공=(\d+)/)
+    const skipMatch    = resultContent.match(/스킵=(\d+)/)
+    const successCount = successMatch ? parseInt(successMatch[1], 10) : null
+    const skipCount    = skipMatch    ? parseInt(skipMatch[1],    10) : 0
+
+    // 2. 오류 문구 감지 (빨간 글씨 / 오류 테이블 텍스트)
+    const hasErrorText = resultContent.includes('오류') ||
+                         resultContent.includes('실패') ||
+                         resultContent.includes('ERROR') ||
+                         resultContent.includes('error')
+
+    let resultStatus: string
+    let resultMessage: string
+    let returnError:  string | undefined
+
+    if (successCount === null) {
+      // ── 케이스 6: 파싱 불가 → 결과 불명확 → manual_review_queue ──
+      resultStatus  = 'UNCLEAR'
+      resultMessage = '결과 파싱 불가 (성공=N 패턴 없음)'
+      returnError   = '업로드 결과 불명확 — 수동검토 큐 등록'
+      addManualReview({
+        review_type:        'UPLOAD_PARTIAL_FAIL',
+        severity:           'HIGH',
+        run_id,
+        error_message:      resultMessage,
+        recommended_action: '투에버 송장업로드(uploadOK.jsp) 화면에서 처리 결과 직접 확인',
+      })
+    } else if (successCount > 0) {
+      // ── 케이스 1: 성공 > 0 ────────────────────────────────────
+      resultStatus  = 'SUCCESS'
+      resultMessage = `성공=${successCount}, 스킵=${skipCount}`
+    } else if (successCount === 0 && skipCount === 0) {
+      // ── 케이스 4: 성공=0, 스킵=0 → 빈 파일 또는 전체 오류 ────
+      resultStatus  = 'FAIL'
+      resultMessage = 'TOEVER_UPLOAD_NO_ROWS: 성공=0, 스킵=0'
+      returnError   = resultMessage
+    } else {
+      // ── 케이스 5: 성공=0, 스킵>0 → 전부 스킵 ─────────────────
+      resultStatus  = 'SKIP'
+      resultMessage = `성공=0, 스킵=${skipCount} (전체 스킵)`
+      returnError   = resultMessage
+    }
+
+    // 오류/빨간 글씨 추가 기록 (케이스 5)
+    if (hasErrorText && resultStatus !== 'FAIL') {
+      const errTextSnippet = resultContent.match(/[가-힣\w\s]*오류[가-힣\w\s]*/)?.[0]?.slice(0, 100) ?? ''
+      resultMessage += ` | 오류문구: ${errTextSnippet}`
+    }
+
+    logToeverAction({
+      run_id,
+      action_type:    'INVOICE_UPLOAD',
+      target_url:     INVOICE_UPLOAD_URL,
+      payload:        JSON.stringify({ filePath: invoiceFilePath, token: (token ?? '').slice(0, 10) + '...' }),
+      result_status:  resultStatus,
+      result_message: resultMessage,
+      screenshot_path: afterSs,
+    })
+
+    if (resultStatus === 'SUCCESS') {
+      return { success: true, resultMessage, screenshotPath: afterSs }
+    }
+
+    return { success: false, error: returnError ?? resultMessage, screenshotPath: afterSs }
+
+  } catch (e) {
+    const errSs = await takeScreenshot(p, 'invoice_upload_error').catch(() => '')
+    logToeverAction({
+      run_id,
+      action_type:    'INVOICE_UPLOAD',
+      result_status:  'ERROR',
+      result_message: String(e),
+      screenshot_path: errSs,
+    })
+    return { success: false, error: String(e), screenshotPath: errSs }
+  }
 }
 
 /**
