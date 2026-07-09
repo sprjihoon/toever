@@ -141,6 +141,34 @@ D:\SpringToeverOps\
 
 ---
 
+## 상태 변경 작업 — Confirm / Dry-run 안전장치
+
+투에버 **송장 업로드**와 **출고작업지시**는 실제 투에버 서버에 쓰기 작업을 수행합니다.
+잘못된 실행을 방지하기 위해 두 단계 안전장치를 적용합니다.
+
+### 안전장치 흐름
+
+| 단계 | IPC 채널 | 설명 |
+|---|---|---|
+| 1. 미리 보기 | `invoice:previewUpload` / `storeout:preview` | 브라우저 없이 대상 주문번호·송장번호 목록만 반환 |
+| 2. 사용자 확인 | UI에서 목록 표시 후 확인 버튼 | 확인 없이 실행 불가 |
+| 3. 실행 | `invoice:uploadToever` / `storeout:execute` | `confirmed: true` 없으면 `CONFIRM_REQUIRED` 오류 반환 |
+
+### Dry-run 기본값
+
+| 옵션 | 동작 |
+|---|---|
+| `dryRun: true` (기본) | 파일 첨부 / 체크박스 탐색까지만, 버튼 클릭·submit 안 함 |
+| `dryRun: false` | 실제 uploadBtn 클릭 / submit 실행 |
+
+### 결과 불명확 처리
+
+- 투에버 응답 페이지에서 성공 메시지도 실패 메시지도 없는 경우 → **자동 재시도 금지**
+- `manual_review_queue`에 `STOREOUT_UNCLEAR` / `UPLOAD_PARTIAL_FAIL` 타입으로 등록
+- 담당자가 수동으로 투에버 화면을 확인 후 처리
+
+---
+
 ## 투에버 송장 업로드 — 누적 처리 방식
 
 송장 업로드는 **누적 처리** 방식으로 동작합니다.
@@ -228,6 +256,7 @@ npm run build:dir
 | 1.0.1 | 2026-07-08 | P0/P1 버그 수정: DB 경로 재초기화, upsertOrderHeader 상태 업데이트, FAILED run 재시도, ezadmin export 날짜 필터 제거, restartScheduler 연동, 업로드 성공 판별 강화 |
 | 1.0.2 | 2026-07-09 | 이지어드민 업로드 파일명에 round(morning/afternoon/manual) + 순번(1차/2차...) 포함, 미사용 설정 항목(company_cd, merchant_cd, entr_no) 제거, 투에버 송장 누적 처리 방식 문서화 |
 | 1.0.3 | 2026-07-09 | `savePdfReport` 추가: 발주내역 출력 URL을 headless Chromium으로 PDF 저장 (`pdf/contracts/`), 조회 결과 없으면 `PDF_SKIPPED_NO_ORDER_RANGE` skip, PDF 실패 시 주 흐름 중단 안 함 |
+| 1.0.4 | 2026-07-09 | 상태 변경 작업 Confirm/Dry-run 안전장치 추가: 송장 업로드·출고작업지시 모두 confirmed=true 없으면 실행 차단, dryRun 기본값 적용, 결과 불명확 시 수동검토 큐 등록 |
 
 ---
 
