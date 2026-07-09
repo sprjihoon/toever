@@ -169,6 +169,24 @@ D:\SpringToeverOps\
 
 ---
 
+## 투에버 송장 업로드 — 결과 판별 기준
+
+`uploadOK.jsp` 응답 페이지를 파싱해 아래 7가지 규칙으로 최종 결과를 결정합니다.
+**자동 재시도는 하지 않습니다.**
+
+| 조건 | `resultStatus` | 처리 |
+|---|---|---|
+| `성공=N (N > 0)` | `SUCCESS` | 정상 완료 |
+| `성공=0` (문구 무관) | `FAIL` | 실패 기록 |
+| `성공=0, 스킵=0` | `FAIL` — `TOEVER_UPLOAD_NO_ROWS` | 빈 파일 또는 전체 오류 |
+| `성공=0, 스킵>0` | `SKIP` | 전체 중복/스킵 |
+| 오류/빨간 글씨 문구 포함 | 위 판정 유지 + 오류 문구 기록 | 실패 사유 명시 |
+| `성공=N` 패턴 미존재 | `UNCLEAR` | `manual_review_queue` 등록 |
+
+> **주의**: `"정상 처리되었습니다"` 문구가 있어도 `성공=0` 이면 성공으로 처리하지 않습니다.
+
+---
+
 ## 투에버 송장 업로드 — 누적 처리 방식
 
 송장 업로드는 **누적 처리** 방식으로 동작합니다.
@@ -257,6 +275,7 @@ npm run build:dir
 | 1.0.2 | 2026-07-09 | 이지어드민 업로드 파일명에 round(morning/afternoon/manual) + 순번(1차/2차...) 포함, 미사용 설정 항목(company_cd, merchant_cd, entr_no) 제거, 투에버 송장 누적 처리 방식 문서화 |
 | 1.0.3 | 2026-07-09 | `savePdfReport` 추가: 발주내역 출력 URL을 headless Chromium으로 PDF 저장 (`pdf/contracts/`), 조회 결과 없으면 `PDF_SKIPPED_NO_ORDER_RANGE` skip, PDF 실패 시 주 흐름 중단 안 함 |
 | 1.0.4 | 2026-07-09 | 상태 변경 작업 Confirm/Dry-run 안전장치 추가: 송장 업로드·출고작업지시 모두 confirmed=true 없으면 실행 차단, dryRun 기본값 적용, 결과 불명확 시 수동검토 큐 등록 |
+| 1.0.5 | 2026-07-09 | 투에버 송장 업로드 결과 판별 로직 확정 (7가지 기준): 성공>0→SUCCESS, 성공=0→FAIL, 성공=0 스킵=0→TOEVER_UPLOAD_NO_ROWS, 파싱불가→UNCLEAR+수동검토 큐, 자동재시도 제거 |
 
 ---
 
