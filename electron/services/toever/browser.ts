@@ -7,7 +7,10 @@ import { logToeverAction, saveFileArtifact, addManualReview } from '../db/reposi
 const TOEVER_BASE          = 'https://support.toever.co.kr'
 const LOGIN_URL            = `${TOEVER_BASE}/Login/login.jsp`
 const ORDER_LIST_URL       = `${TOEVER_BASE}/VendorMgr/PoState/orderDtlP.jsp`
-const INVOICE_UPLOAD_URL   = `${TOEVER_BASE}/VendorMgr/PoState/uploadInvoice.jsp`
+// 실제 업로드 URL (탐색으로 확인: 2026-07-09)
+// 구 URL /VendorMgr/PoState/uploadInvoice.jsp 는 404
+const INVOICE_UPLOAD_URL   = `${TOEVER_BASE}/deliveryupload/deliveryListP.jsp`
+const INVOICE_UPLOAD_ACTION = `${TOEVER_BASE}/deliveryupload/uploadOK.jsp`
 const REPORT_HTML_URL      = `${TOEVER_BASE}/VendorMgr/PoState/rptSalePaperPrintP_HTML.jsp`
 
 // 로그인 실패 문자열
@@ -298,19 +301,26 @@ export async function uploadToeverInvoice(
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
+      // 실제 업로드 URL: /deliveryupload/deliveryListP.jsp
+      // (구 URL /VendorMgr/PoState/uploadInvoice.jsp 는 404 — 2026-07-09 확인)
       await p.goto(INVOICE_UPLOAD_URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
       await p.waitForTimeout(2000)
 
-      const targetFrame = p.frame({ name: 'mainFrm' }) ?? p
+      // deliveryListP.jsp 는 mainFrm 없이 단일 페이지로 로드됨
+      const targetFrame = p.frame({ name: 'mainFrm' })
+        ?? p.frames().find(f => f.url().includes('deliveryListP') || f.url().includes('deliveryupload'))
+        ?? p
 
-      // UPLOAD_TOKEN 확인 (고정값 사용 금지)
-      await targetFrame.waitForSelector('input[name="UPLOAD_TOKEN"]', { timeout: 15000 })
-      const token = await targetFrame.$eval(
-        'input[name="UPLOAD_TOKEN"]',
-        (el: HTMLInputElement) => el.value
-      )
+      // 파일 input 대기 (페이지 로드 확인)
+      await targetFrame.waitForSelector('input#uploadFile', { timeout: 15000 })
 
-      if (!token || token.trim() === '') {
+      // UPLOAD_TOKEN 확인 (고정값 사용 금지, 없으면 경고만 — 페이지에 따라 없을 수 있음)
+      const tokenEl = await targetFrame.$('input[name="UPLOAD_TOKEN"]').catch(() => null)
+      const token   = tokenEl
+        ? await targetFrame.$eval('input[name="UPLOAD_TOKEN"]', (el: HTMLInputElement) => el.value).catch(() => '')
+        : ''
+
+      if (tokenEl && (!token || token.trim() === '')) {
         const tokenErrSs = await takeScreenshot(p, 'upload_token_missing')
         logToeverAction({
           run_id,
@@ -326,7 +336,7 @@ export async function uploadToeverInvoice(
         }
       }
 
-      // 파일 첨부
+      // 파일 첨부 (accept="application/vnd.ms-excel,.xls")
       await targetFrame.setInputFiles('input#uploadFile', invoiceFilePath)
       await p.waitForTimeout(500)
 
@@ -338,7 +348,7 @@ export async function uploadToeverInvoice(
           run_id,
           action_type: 'INVOICE_UPLOAD',
           target_url: INVOICE_UPLOAD_URL,
-          payload: JSON.stringify({ filePath: invoiceFilePath, dryRun: true }),
+          payload: JSON.stringify({ filePath: invoiceFilePath, dryRun: true, token: token?.slice(0, 10) }),
           result_status: 'SKIP',
           result_message: 'DRY_RUN — uploadBtn 클릭 안 함',
           screenshot_path: beforeSs,
@@ -346,9 +356,9 @@ export async function uploadToeverInvoice(
         return { success: true, dryRun: true, resultMessage: 'DRY_RUN', screenshotPath: beforeSs }
       }
 
-      // 업로드 버튼 클릭
+      // 업로드 버튼 클릭 (form action: uploadOK.jsp)
       await Promise.all([
-        targetFrame.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}),
+        p.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}),
         targetFrame.click('input#uploadBtn'),
       ])
 
@@ -361,7 +371,9 @@ export async function uploadToeverInvoice(
         resultContent.includes('등록 완료') ||
         resultContent.includes('성공적으로') ||
         resultContent.includes('처리 완료') ||
-        resultContent.includes('건 처리')
+        resultContent.includes('건 처리') ||
+        resultContent.includes('건이 등록') ||
+        resultContent.includes('처리되었습니다')
       const hasFailSign = resultContent.includes('실패') ||
         resultContent.includes('오류') ||
         resultContent.includes('error') ||
