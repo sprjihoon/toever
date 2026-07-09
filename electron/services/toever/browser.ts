@@ -624,11 +624,17 @@ export interface PdfReportResult {
  * 투에버 발주내역 출력 페이지를 PDF로 저장한다.
  *
  * 흐름:
- *  1. 로그인된 context 에서 쿠키 복사
- *  2. 발주내역 페이지에서 getReportCommonParams() 호출 → p_order_no/p_order_noTo 추출
- *  3. Headless 브라우저 + 복사된 쿠키로 rptSalePaperPrintP_HTML.jsp 접근
- *  4. page.pdf() 로 저장
- *  5. artifact DB 등록
+ *  1. 발주내역 페이지에서 getReportCommonParams() 호출 → 발주번호(019001...) 범위 추출
+ *  2. p_order_no가 발주번호(019 prefix) 형식인지 검증 — 주문번호(010 prefix)면 INVALID_ORDER_RANGE
+ *  3. Headless 브라우저 + 쿠키로 rptSalePaperPrintP_HTML.jsp 접근
+ *  4. OZ Viewer 로딩 완료 대기 (로딩 문구 소멸 폴링 + 3s 추가 대기)
+ *  5. "조회된 데이터가 없습니다" 감지 시 PDF_OZ_NO_DATA skip
+ *  6. page.pdf() 로 저장
+ *  7. artifact DB 등록
+ *
+ * 발주번호 vs 주문번호:
+ *  - pdf_order_no_from / pdf_order_no_to = 발주번호 (019001...) — OZ Viewer 전용
+ *  - toever_order_no                     = 주문번호 (010001...) — 이지어드민/송장업로드 전용
  */
 export async function savePdfReport(params: PdfReportParams): Promise<PdfReportResult> {
   const { context, dateFrom, dateTo, run_id } = params
@@ -636,119 +642,195 @@ export async function savePdfReport(params: PdfReportParams): Promise<PdfReportR
   let headlessBrowser: Browser | null = null
 
   try {
-    // ── Step 1: 발주내역 페이지에서 report 파라미터 추출 ──────────
-    //   window.open 을 가로채서 실제 URL 캡처 (조회 결과 기반 동적 파라미터)
+    // ── Step 1: getReportCommonParams() 로 발주번호 범위 추출 ─────
+    // 주의: 이 함수는 발주번호(019001...) 를 반환한다.
+    //       toever_order_no(주문번호 010001...)를 절대 사용하지 않는다.
     const headedPage = context.pages().find(p => p.url().includes('orderDtlP')) ?? null
 
-    let reportUrl: string | null = null
+    let pdf_order_no_from: string | null = null
+    let pdf_order_no_to:   string | null = null
+    let reportUrl:         string | null = null
 
     if (headedPage) {
-      reportUrl = await headedPage.evaluate(() => {
-        let captured: string | null = null
-        const origOpen = window.open.bind(window)
-        // window.open 을 일시적으로 가로채기 (창 안 열고 URL만 캡처)
-        ;(window as any).open = (url: string) => { captured = url; return null }
-        try {
-          if (typeof (window as any).showReport_HTML === 'function') {
-            ;(window as any).showReport_HTML()
-          }
-        } catch { /* 무시 */ }
-        ;(window as any).open = origOpen
-        return captured
+      // 1-A: getReportCommonParams() 직접 호출 (발주번호 기반 파라미터 전용)
+      const commonParams = await headedPage.evaluate(() => {
+        if (typeof (window as any).getReportCommonParams === 'function') {
+          return (window as any).getReportCommonParams()
+        }
+        return null
       }).catch(() => null)
-    }
 
-    // 동적 추출 실패 시 → 발주내역 페이지에서 직접 파라미터 수집
-    if (!reportUrl) {
-      if (headedPage) {
-        const p = await headedPage.evaluate(() => {
-          if (typeof (window as any).getReportCommonParams === 'function') {
-            return (window as any).getReportCommonParams()
-          }
-          return null
+      if (commonParams?.p_order_no && commonParams?.p_order_noTo) {
+        pdf_order_no_from = String(commonParams.p_order_no)
+        pdf_order_no_to   = String(commonParams.p_order_noTo)
+
+        const qs = new URLSearchParams({
+          p_xml_file:     '/SALE/vendor_sale_paper_new.ozr',
+          p_company_cd:   commonParams.p_company_cd  ?? '01',
+          p_merchant_cd:  commonParams.p_merchant_cd ?? '0001',
+          p_entr_no:      commonParams.p_entr_no     ?? '',
+          p_order_dt:     dateFrom.replace(/-/g, ''),
+          p_order_dtTo:   dateTo.replace(/-/g, ''),
+          p_storeout_sts: commonParams.p_storeout_sts ?? '01',
+          p_order_no:     pdf_order_no_from,
+          p_order_noTo:   pdf_order_no_to,
+        })
+        reportUrl = `${REPORT_HTML_URL}?${qs.toString()}`
+      }
+
+      // 1-B: fallback — showReport_HTML() window.open 인터셉트
+      if (!reportUrl) {
+        const intercepted = await headedPage.evaluate(() => {
+          return new Promise<string | null>(resolve => {
+            const orig = window.open
+            ;(window as any).open = (url: string) => {
+              ;(window as any).open = orig
+              resolve(url)
+              return null
+            }
+            try {
+              if (typeof (window as any).showReport_HTML === 'function') {
+                ;(window as any).showReport_HTML()
+              } else {
+                resolve(null)
+              }
+            } catch {
+              resolve(null)
+            }
+            setTimeout(() => { ;(window as any).open = orig; resolve(null) }, 1500)
+          })
         }).catch(() => null)
 
-        if (p && p.p_order_no && p.p_order_noTo) {
-          const qs = new URLSearchParams({
-            p_xml_file:     '/SALE/vendor_sale_paper_new.ozr',
-            p_company_cd:   p.p_company_cd  ?? '01',
-            p_merchant_cd:  p.p_merchant_cd ?? '0001',
-            p_entr_no:      p.p_entr_no     ?? '',
-            p_order_dt:     dateFrom.replace(/-/g, ''),
-            p_order_dtTo:   dateTo.replace(/-/g, ''),
-            p_storeout_sts: p.p_storeout_sts ?? '01',
-            p_order_no:     p.p_order_no,
-            p_order_noTo:   p.p_order_noTo,
-          })
-          reportUrl = `${REPORT_HTML_URL}?${qs.toString()}`
+        if (intercepted) {
+          reportUrl = intercepted
+          // intercepted URL에서 p_order_no 추출
+          try {
+            const iu = new URL(intercepted.startsWith('http') ? intercepted : TOEVER_BASE + intercepted)
+            pdf_order_no_from = iu.searchParams.get('p_order_no')
+            pdf_order_no_to   = iu.searchParams.get('p_order_noTo')
+          } catch { /* 무시 */ }
         }
       }
     }
 
-    if (!reportUrl) {
+    if (!reportUrl || !pdf_order_no_from || !pdf_order_no_to) {
       const reason = '발주내역 페이지에서 발주번호 범위를 추출하지 못했습니다. (조회 결과가 없거나 페이지가 닫힘)'
       logToeverAction({
-        run_id,
-        action_type: 'PDF_REPORT',
-        target_url:  REPORT_HTML_URL,
-        result_status: 'SKIP',
-        result_message: 'PDF_SKIPPED_NO_ORDER_RANGE',
+        run_id, action_type: 'PDF_REPORT', target_url: REPORT_HTML_URL,
+        result_status: 'SKIP', result_message: 'PDF_SKIPPED_NO_ORDER_RANGE',
       })
       return { success: false, skipped: true, skip_reason: reason }
     }
 
-    // URL이 절대경로가 아니면 BASE 추가
+    // ── Step 2: 발주번호 형식 검증 ───────────────────────────────
+    // 발주번호: 019001... 로 시작
+    // 주문번호: 010001... 로 시작 — OZ Viewer에 사용 금지
+    const isPoBandNo = (v: string) => /^0[1-9]\d{17,}$/.test(v) && !v.startsWith('010')
+
+    if (!isPoBandNo(pdf_order_no_from) || !isPoBandNo(pdf_order_no_to)) {
+      const reason =
+        `PDF_REPORT_INVALID_ORDER_RANGE: p_order_no="${pdf_order_no_from}" p_order_noTo="${pdf_order_no_to}"` +
+        ' — 주문번호(010001...)가 발주번호 자리에 잘못 들어갔거나 형식 불일치'
+      logToeverAction({
+        run_id, action_type: 'PDF_REPORT', target_url: REPORT_HTML_URL,
+        result_status: 'SKIP', result_message: reason,
+      })
+      return { success: false, skipped: true, skip_reason: reason }
+    }
+
+    // URL이 상대경로면 BASE 추가
     if (!reportUrl.startsWith('http')) {
       reportUrl = TOEVER_BASE + (reportUrl.startsWith('/') ? reportUrl : '/' + reportUrl)
     }
 
-    // ── Step 2: 쿠키 복사 ────────────────────────────────────────
+    // ── Step 3: 쿠키 복사 + Headless 브라우저 실행 ───────────────
     const cookies = await context.cookies()
 
-    // ── Step 3: Headless 브라우저로 PDF 저장 ─────────────────────
     headlessBrowser = await chromium.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     })
-
-    const headlessCtx = await headlessBrowser.newContext({
-      locale:     'ko-KR',
-      timezoneId: 'Asia/Seoul',
-    })
+    const headlessCtx = await headlessBrowser.newContext({ locale: 'ko-KR', timezoneId: 'Asia/Seoul' })
     await headlessCtx.addCookies(cookies)
-
     const headlessPage = await headlessCtx.newPage()
 
     // 출력 URL 접근 (GET 요청 — 상태 변경 없음)
     await headlessPage.goto(reportUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
 
-    // 네트워크 안정화 대기 (최대 10초)
-    await headlessPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
-    await headlessPage.waitForTimeout(1500)  // 렌더링 여유
+    // ── Step 4: OZ Viewer 로딩 완료 대기 ────────────────────────
+    // 로딩 중 화면을 PDF로 저장하면 "오즈 리포트 뷰어를 실행하고 있습니다" 내용만 찍힘
+    const OZ_LOADING_TEXTS = [
+      '오즈 리포트 뷰어를 실행하고 있습니다',
+      '데이터 모듈을 받기 시작합니다',
+      '데이터 모듈을 받고 있습니다',
+    ]
+    const OZ_NO_DATA_TEXT = '조회된 데이터가 없습니다'
 
-    // 로그인 리다이렉트 감지
+    const OZ_LOAD_MAX_MS  = 35000
+    const OZ_POLL_MS      = 2000
+    let ozLoadElapsed     = 0
+    let ozLoadingDone     = false
+
+    while (ozLoadElapsed < OZ_LOAD_MAX_MS) {
+      await headlessPage.waitForTimeout(OZ_POLL_MS)
+      ozLoadElapsed += OZ_POLL_MS
+
+      const bodyText = await headlessPage.evaluate(() =>
+        document.body?.innerText ?? ''
+      ).catch(() => '')
+
+      const stillLoading = OZ_LOADING_TEXTS.some(t => bodyText.includes(t))
+      if (!stillLoading) {
+        ozLoadingDone = true
+        // 로딩 문구 사라진 후 3초 추가 대기 (렌더링 완료)
+        await headlessPage.waitForTimeout(3000)
+        break
+      }
+    }
+
+    // 로딩 완료 후 본문 확인
+    const finalBodyText = await headlessPage.evaluate(() =>
+      document.body?.innerText ?? ''
+    ).catch(() => '')
+
     const finalUrl = headlessPage.url()
     const pageContent = await headlessPage.content()
+
+    // 로그인 리다이렉트 감지
     if (finalUrl.includes('login') || finalUrl.includes('Login') || pageContent.includes('p_login_id')) {
       const errSs = await headlessPage.screenshot({ path: screenshotPath('pdf_session_expired') }).catch(() => '')
-      return {
-        success: false,
-        error: '출력 페이지 접근 시 로그인 리다이렉트 (세션 만료)',
-        screenshotPath: errSs as string,
-      }
+      return { success: false, error: '출력 페이지 접근 시 로그인 리다이렉트 (세션 만료)', screenshotPath: errSs as string }
+    }
+
+    // OZ "조회된 데이터가 없습니다" 감지 → PDF 저장 건너뜀
+    if (finalBodyText.includes(OZ_NO_DATA_TEXT)) {
+      const ss = await headlessPage.screenshot({ path: screenshotPath('pdf_oz_no_data') }).catch(() => '') as string
+      logToeverAction({
+        run_id, action_type: 'PDF_REPORT', target_url: reportUrl,
+        result_status: 'SKIP', result_message: `PDF_OZ_NO_DATA (p_order_no=${pdf_order_no_from})`,
+        screenshot_path: ss,
+      })
+      return { success: false, skipped: true, skip_reason: `OZ Viewer 조회 결과 없음 (발주번호 범위: ${pdf_order_no_from}~${pdf_order_no_to})` }
+    }
+
+    // 타임아웃 후에도 로딩 문구가 남아있으면 경고 (PDF는 일단 시도)
+    if (!ozLoadingDone) {
+      logToeverAction({
+        run_id, action_type: 'PDF_REPORT', target_url: reportUrl,
+        result_status: 'WARN', result_message: `OZ Viewer 로딩 타임아웃(${OZ_LOAD_MAX_MS}ms) — page.pdf() 강행`,
+      })
     }
 
     // PDF 저장 경로
     const pdfDir = DIRS.pdfContracts()
     if (!fs.existsSync(pdfDir)) fs.mkdirSync(pdfDir, { recursive: true })
 
-    const datePfx = dateFrom.replace(/-/g, '')
-    const ts      = Date.now()
-    const runSuffix = run_id != null ? `_run${run_id}` : `_${ts}`
+    const datePfx   = dateFrom.replace(/-/g, '')
+    const runSuffix = run_id != null ? `_run${run_id}` : `_${Date.now()}`
     const filename  = `${datePfx}_report${runSuffix}.pdf`
     const filePath  = path.join(pdfDir, filename)
 
-    // ── Step 4: PDF 저장 ─────────────────────────────────────────
+    // ── Step 5: PDF 저장 ─────────────────────────────────────────
     await headlessPage.pdf({
       path:            filePath,
       format:          'A4',
@@ -757,22 +839,18 @@ export async function savePdfReport(params: PdfReportParams): Promise<PdfReportR
       margin: { top: '8mm', bottom: '8mm', left: '5mm', right: '5mm' },
     })
 
-    // ── Step 5: 파일 크기 확인 ───────────────────────────────────
+    // ── Step 6: 파일 크기 확인 ───────────────────────────────────
     if (!fs.existsSync(filePath)) {
       return { success: false, error: 'PDF 파일이 생성되지 않았습니다.' }
     }
     const stat = fs.statSync(filePath)
     if (stat.size === 0) {
-      fs.unlinkSync(filePath)  // 0바이트 파일 삭제
+      fs.unlinkSync(filePath)
       const errSs = await headlessPage.screenshot({ path: screenshotPath('pdf_empty') }).catch(() => '')
-      return {
-        success: false,
-        error: 'PDF 파일이 0바이트입니다. (렌더링 실패)',
-        screenshotPath: errSs as string,
-      }
+      return { success: false, error: 'PDF 파일이 0바이트입니다. (렌더링 실패)', screenshotPath: errSs as string }
     }
 
-    // ── Step 6: artifact DB 등록 ─────────────────────────────────
+    // ── Step 7: artifact DB 등록 ─────────────────────────────────
     try {
       const buf = fs.readFileSync(filePath)
       saveFileArtifact({
@@ -785,13 +863,13 @@ export async function savePdfReport(params: PdfReportParams): Promise<PdfReportR
       })
     } catch { /* artifact 등록 실패는 무시 */ }
 
-    // ── Step 7: 성공 로그 ────────────────────────────────────────
+    // ── Step 8: 성공 로그 ────────────────────────────────────────
     logToeverAction({
       run_id,
       action_type:    'PDF_REPORT',
-      target_url:     reportUrl,
+      target_url:     reportUrl ?? REPORT_HTML_URL,
       result_status:  'SUCCESS',
-      result_message: `${filename} (${(stat.size / 1024).toFixed(1)} KB)`,
+      result_message: `${filename} (${(stat.size / 1024).toFixed(1)} KB) po=${pdf_order_no_from}~${pdf_order_no_to}`,
     })
 
     return { success: true, filePath, size_bytes: stat.size }
