@@ -19,6 +19,7 @@ Windows 데스크탑 애플리케이션 (Electron + React + TypeScript)
 | 데이터 복원 | 백업 폴더를 선택하면 어떤 PC에서도 동일 데이터로 복원 |
 | 스케줄러 | 오전/오후 주문 수집, 마감 백업 자동 실행 (평일 기준) |
 | Chromium 관리 | Playwright 브라우저를 userData에 설치/관리 (앱 재설치 후에도 유지) |
+| 발주내역 PDF 저장 | 투에버 발주내역 출력 페이지를 headless Chromium으로 PDF 저장 (`pdf/contracts/YYYYMMDD_report_runN.pdf`), 실패해도 주문 수집 흐름 중단 안 함 |
 
 ---
 
@@ -226,6 +227,7 @@ npm run build:dir
 | 1.0.0 | 2026-07-08 | 최초 릴리즈 |
 | 1.0.1 | 2026-07-08 | P0/P1 버그 수정: DB 경로 재초기화, upsertOrderHeader 상태 업데이트, FAILED run 재시도, ezadmin export 날짜 필터 제거, restartScheduler 연동, 업로드 성공 판별 강화 |
 | 1.0.2 | 2026-07-09 | 이지어드민 업로드 파일명에 round(morning/afternoon/manual) + 순번(1차/2차...) 포함, 미사용 설정 항목(company_cd, merchant_cd, entr_no) 제거, 투에버 송장 누적 처리 방식 문서화 |
+| 1.0.3 | 2026-07-09 | `savePdfReport` 추가: 발주내역 출력 URL을 headless Chromium으로 PDF 저장 (`pdf/contracts/`), 조회 결과 없으면 `PDF_SKIPPED_NO_ORDER_RANGE` skip, PDF 실패 시 주 흐름 중단 안 함 |
 
 ---
 
