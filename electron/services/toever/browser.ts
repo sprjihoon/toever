@@ -366,38 +366,55 @@ export async function uploadToeverInvoice(
       const afterSs = await takeScreenshot(p, `invoice_upload_attempt${attempt}_result`)
 
       const resultContent = await p.content()
-      // 성공 판별: 구체적 성공 메시지 포함 AND 실패/오류 메시지 미포함
-      const hasSuccessSign = resultContent.includes('업로드 완료') ||
-        resultContent.includes('등록 완료') ||
-        resultContent.includes('성공적으로') ||
-        resultContent.includes('처리 완료') ||
-        resultContent.includes('건 처리') ||
-        resultContent.includes('건이 등록') ||
-        resultContent.includes('처리되었습니다')
-      const hasFailSign = resultContent.includes('실패') ||
-        resultContent.includes('오류') ||
-        resultContent.includes('error') ||
-        resultContent.includes('ERROR')
-      const isSuccess = hasSuccessSign && !hasFailSign
+
+      // 투에버 업로드 결과 형식 (uploadOK.jsp 확인 기준 2026-07-09):
+      //   "완료: 정상 처리되었습니다. 성공=N, 스킵=N"
+      //   성공=0 이면 실제로 처리된 건 없음 → 실패로 간주
+      const successCountMatch = resultContent.match(/성공=(\d+)/)
+      const successCount = successCountMatch ? parseInt(successCountMatch[1], 10) : -1
+
+      // 성공=N (N > 0) 이어야 실제 성공
+      const isSuccess = successCount > 0
+
+      // 스킵 건수 파싱
+      const skipCountMatch = resultContent.match(/스킵=(\d+)/)
+      const skipCount = skipCountMatch ? parseInt(skipCountMatch[1], 10) : 0
+
+      const resultSummary = successCountMatch
+        ? `성공=${successCount}, 스킵=${skipCount}`
+        : `attempt=${attempt} (성공 건수 파싱 불가)`
 
       logToeverAction({
         run_id,
         action_type: 'INVOICE_UPLOAD',
         target_url: INVOICE_UPLOAD_URL,
-        payload: JSON.stringify({ filePath: invoiceFilePath, token: token.slice(0, 10) + '...' }),
-        result_status: isSuccess ? 'SUCCESS' : 'FAIL',
-        result_message: `attempt=${attempt}`,
+        payload: JSON.stringify({ filePath: invoiceFilePath, token: (token ?? '').slice(0, 10) + '...' }),
+        result_status: isSuccess ? 'SUCCESS' : (successCount === 0 ? 'SKIP' : 'FAIL'),
+        result_message: resultSummary,
         screenshot_path: afterSs,
       })
 
       if (isSuccess) {
-        return { success: true, resultMessage: '업로드 완료', screenshotPath: afterSs }
+        return {
+          success: true,
+          resultMessage: `업로드 완료 (${resultSummary})`,
+          screenshotPath: afterSs,
+        }
+      }
+
+      // 성공=0 이면 재시도해도 의미 없음 — 즉시 실패 반환
+      if (successCount === 0) {
+        return {
+          success: false,
+          error: `업로드 성공 건 없음 (${resultSummary})`,
+          screenshotPath: afterSs,
+        }
       }
 
       if (attempt >= MAX_ATTEMPTS) {
         return {
           success: false,
-          error: '업로드 실패 (결과 불명확)',
+          error: `업로드 실패 — 성공 건수 파싱 불가 (attempt=${attempt})`,
           screenshotPath: afterSs,
         }
       }
