@@ -19,7 +19,7 @@ Windows 데스크탑 애플리케이션 (Electron + React + TypeScript)
 | 데이터 복원 | 백업 폴더를 선택하면 어떤 PC에서도 동일 데이터로 복원 |
 | 스케줄러 | 오전/오후 주문 수집, 마감 백업 자동 실행 (평일 기준) |
 | Chromium 관리 | Playwright 브라우저를 userData에 설치/관리 (앱 재설치 후에도 유지) |
-| 발주내역 PDF 저장 | 투에버 발주내역 출력 페이지를 headless Chromium으로 PDF 저장 (`pdf/contracts/YYYYMMDD_report_runN.pdf`), 실패해도 주문 수집 흐름 중단 안 함 |
+| 발주내역 PDF 저장 | OZ Viewer 저장 버튼 클릭 → PDF 형식 선택 → 확인 → Playwright download 이벤트로 저장 (`pdf/contracts/YYYYMMDD_report_runN.pdf`), 실패해도 주문 수집 흐름 중단 안 함 |
 
 ---
 
@@ -276,6 +276,7 @@ npm run build:dir
 | 1.0.3 | 2026-07-09 | `savePdfReport` 추가: 발주내역 출력 URL을 headless Chromium으로 PDF 저장 (`pdf/contracts/`), 조회 결과 없으면 `PDF_SKIPPED_NO_ORDER_RANGE` skip, PDF 실패 시 주 흐름 중단 안 함 |
 | 1.0.4 | 2026-07-09 | 상태 변경 작업 Confirm/Dry-run 안전장치 추가: 송장 업로드·출고작업지시 모두 confirmed=true 없으면 실행 차단, dryRun 기본값 적용, 결과 불명확 시 수동검토 큐 등록 |
 | 1.0.5 | 2026-07-09 | 투에버 송장 업로드 결과 판별 로직 확정 (7가지 기준): 성공>0→SUCCESS, 성공=0→FAIL, 성공=0 스킵=0→TOEVER_UPLOAD_NO_ROWS, 파싱불가→UNCLEAR+수동검토 큐, 자동재시도 제거 |
+| 1.0.6 | 2026-07-09 | `savePdfReport` PDF 저장 방식 변경: page.pdf() 폐기 → OZ Viewer 저장 버튼(btnSAVEAS) 클릭 → select[1] Adobe PDF 선택 → 확인 클릭 → Playwright download 이벤트 수신 (74 KB, .pdf 확인됨) |
 
 ---
 
