@@ -61,7 +61,7 @@ export default function Settings() {
     try {
       const result = await api.settings.save(settings)
       if (result.success) {
-        // ???? ?? ? ??? ???
+        // 비밀번호 저장 후 상태 초기화 처리
         if (settings.toever_password.trim() !== '') {
           setHasStoredPassword(true)
           setChangingPassword(false)
@@ -97,7 +97,7 @@ export default function Settings() {
     const api = window.toeverApi
     if (!api) return
     const r = await api.fs.selectFolder({
-      title: '??? ?? ?? ??',
+      title: '저장소 기본 경로 선택',
       defaultPath: settings.storage_base_path || undefined,
     })
     if (r.success && r.data) {
@@ -110,7 +110,7 @@ export default function Settings() {
     const api = window.toeverApi
     if (!api) return
     const r = await api.fs.selectFolder({
-      title: '?? ?? ??',
+      title: '백업 경로 선택',
       defaultPath: settings.backup_path || undefined,
     })
     if (r.success && r.data) {
@@ -132,9 +132,9 @@ export default function Settings() {
     setInstallingChromium(false)
     if (r.success) {
       setChromiumOk(true)
-      setChromiumLog(prev => [...prev, '? Chromium ?? ??'])
+      setChromiumLog(prev => [...prev, '✓ Chromium 설치 완료'])
     } else {
-      setChromiumLog(prev => [...prev, `? ??: ${r.error}`])
+      setChromiumLog(prev => [...prev, `✗ 오류: ${r.error}`])
     }
   }
 
@@ -184,13 +184,13 @@ export default function Settings() {
   return (
     <div style={{ padding: 24, maxWidth: 640, display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#f1f5f9' }}>??</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#f1f5f9' }}>설정</h1>
         <button className="btn-primary" onClick={handleSave} disabled={saving}>
-          {saving ? '?? ?...' : saved ? '? ???' : '??'}
+          {saving ? '저장 중...' : saved ? '✓ 저장됨' : '저장'}
         </button>
       </div>
 
-      {/* ??? ?? ?? */}
+      {/* 재시작 필요 배너 */}
       {needsRestart && (
         <div style={{
           padding: '12px 16px', borderRadius: 8,
@@ -198,21 +198,21 @@ export default function Settings() {
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
         }}>
           <div style={{ fontSize: 13, color: '#fde68a' }}>
-            ? ?? ??? ???????. ?? ????? ?????.
+            ⚠ 설정 변경이 적용되려면, 앱을 재시작해야 합니다.
           </div>
           <button onClick={handleRestart} style={{
             padding: '6px 14px', borderRadius: 6, fontSize: 12,
             background: '#f59e0b', color: '#0f172a', border: 'none', cursor: 'pointer', fontWeight: 600,
             flexShrink: 0,
           }}>
-            ?? ???
+            지금 재시작
           </button>
         </div>
       )}
 
-      {/* ??? ?? ?? */}
-      <SectionCard title="??? ?? ??">
-        {/* ??? ???? ?? ?? ?? */}
+      {/* 투에버 계정 설정 */}
+      <SectionCard title="투에버 계정 설정">
+        {/* 이미 저장된 경우 상태 배너 표시 */}
         {settings.toever_id && hasStoredPassword && !changingPassword && (
           <div style={{
             padding: '10px 14px', borderRadius: 8,
@@ -220,7 +220,7 @@ export default function Settings() {
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
             <div>
-              <span style={{ fontSize: 13, color: '#86efac', fontWeight: 600 }}>? ??? ?? ???</span>
+              <span style={{ fontSize: 13, color: '#86efac', fontWeight: 600 }}>✓ 로그인 정보 저장됨</span>
               <span style={{ fontSize: 12, color: '#64748b', marginLeft: 8 }}>
                 ID: {settings.toever_id}
               </span>
@@ -229,47 +229,47 @@ export default function Settings() {
               onClick={() => setChangingPassword(true)}
               style={{ ...browseBtn, fontSize: 11 }}
             >
-              ??
+              변경
             </button>
           </div>
         )}
 
-        <FieldRow label="??? ID" hint="??? Support ???? ??? ID? ?????.">
+        <FieldRow label="투에버 ID" hint="투에버 Support 사이트에서 사용하는 ID를 입력하세요.">
           <input
             type="text"
             value={settings.toever_id}
             onChange={e => setSettings(s => ({ ...s, toever_id: e.target.value }))}
             style={inputStyle}
-            placeholder="??? ??? ID"
+            placeholder="투에버 로그인 ID"
           />
         </FieldRow>
 
-        {/* ????: ??? + ?? ?? ?? */}
+        {/* 비밀번호: 이미 저장된 경우 다른 방식으로 표시 */}
         {hasStoredPassword && !changingPassword ? (
-          <FieldRow label="????">
+          <FieldRow label="비밀번호">
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{
                 flex: 1, padding: '8px 12px', borderRadius: 6,
                 background: '#0f172a', border: '1px solid #1e3a2f',
                 fontSize: 13, color: '#4ade80',
               }}>
-                ? ???? ??? &nbsp;
+                ✓ 암호화 저장됨 &nbsp;
                 <span style={{ color: '#334155', fontSize: 12 }}>
-                  (Windows DPAPI ???)
+                  (Windows DPAPI 암호화)
                 </span>
               </div>
               <button
                 onClick={() => setChangingPassword(true)}
                 style={browseBtn}
               >
-                ???? ??
+                비밀번호 변경
               </button>
             </div>
           </FieldRow>
         ) : (
           <FieldRow
-            label={changingPassword ? '? ????' : '????'}
-            hint="????? Windows DPAPI? ??????. ?? ? ???? ???? ?????."
+            label={changingPassword ? '새 비밀번호' : '비밀번호'}
+            hint="비밀번호는 Windows DPAPI로 암호화됩니다. 이 PC 계정 로그인 없이 복호화 불가합니다."
           >
             <div style={{ display: 'flex', gap: 6 }}>
               <input
@@ -277,11 +277,11 @@ export default function Settings() {
                 value={settings.toever_password}
                 onChange={e => setSettings(s => ({ ...s, toever_password: e.target.value }))}
                 style={{ ...inputStyle, flex: 1 }}
-                placeholder={changingPassword ? '? ???? ??' : '???? ??'}
+                placeholder={changingPassword ? '새 비밀번호 입력' : '비밀번호 입력'}
                 autoFocus={changingPassword}
               />
               <button style={browseBtn} onClick={() => setShowPassword(v => !v)}>
-                {showPassword ? '???' : '??'}
+                {showPassword ? '숨기기' : '표시'}
               </button>
               {changingPassword && (
                 <button
@@ -291,7 +291,7 @@ export default function Settings() {
                     setSettings(s => ({ ...s, toever_password: '' }))
                   }}
                 >
-                  ??
+                  취소
                 </button>
               )}
             </div>
@@ -299,42 +299,42 @@ export default function Settings() {
         )}
       </SectionCard>
 
-      {/* ?? ?? */}
-      <SectionCard title="?? ??">
-        <FieldRow label="??? ?? ??" hint="?? ??, ?? ??, DB? ?????. ?? ? ?? ????? ???.">
+      {/* 경로 설정 */}
+      <SectionCard title="경로 설정">
+        <FieldRow label="저장소 기본 경로" hint="주문 파일, 송장 파일, DB가 저장됩니다. 변경 후 앱 재시작이 필요합니다.">
           <div style={{ display: 'flex', gap: 6 }}>
             <input
               type="text"
               value={settings.storage_base_path}
               onChange={e => setSettings(s => ({ ...s, storage_base_path: e.target.value }))}
               style={{ ...inputStyle, flex: 1 }}
-              placeholder="?: C:\Users\???\Documents\SpringToeverOps"
+              placeholder="예: C:\Users\사용자\Documents\SpringToeverOps"
             />
-            <button style={browseBtn} onClick={handleBrowseStorage}>?? ??</button>
-            <button style={browseBtn} onClick={handleTestStorage}>???</button>
+            <button style={browseBtn} onClick={handleBrowseStorage}>폴더 선택</button>
+            <button style={browseBtn} onClick={handleTestStorage}>연결확인</button>
           </div>
           {storageOk !== null && (
             <span style={{ fontSize: 11, color: storageOk ? '#22c55e' : '#ef4444' }}>
-              {storageOk ? '? ?? ?? ??' : '? ?? ?? ??'}
+              {storageOk ? '✓ 경로 접근 가능' : '✗ 경로 접근 불가'}
             </span>
           )}
         </FieldRow>
-        <FieldRow label="?? ?? ??" hint="??/?? ?? ???????. ?? SSD ? ?? ???? ?????.">
+        <FieldRow label="백업 저장 경로" hint="데이터/설정 자동백업 경로입니다. 별도 SSD 나 외장 드라이브 권장합니다.">
           <div style={{ display: 'flex', gap: 6 }}>
             <input
               type="text"
               value={settings.backup_path}
               onChange={e => setSettings(s => ({ ...s, backup_path: e.target.value }))}
               style={{ ...inputStyle, flex: 1 }}
-              placeholder="?: E:\SpringToeverOpsBackup"
+              placeholder="예: E:\SpringToeverOpsBackup"
             />
-            <button style={browseBtn} onClick={handleBrowseBackup}>?? ??</button>
+            <button style={browseBtn} onClick={handleBrowseBackup}>폴더 선택</button>
           </div>
         </FieldRow>
       </SectionCard>
 
-      {/* ???? ?? */}
-      <SectionCard title="???? ??">
+      {/* 스케줄러 설정 */}
+      <SectionCard title="스케줄러 설정">
         <FieldRow label="">
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
             <input
@@ -342,22 +342,22 @@ export default function Settings() {
               checked={settings.scheduler_enabled}
               onChange={e => setSettings(s => ({ ...s, scheduler_enabled: e.target.checked }))}
             />
-            <span style={{ fontSize: 13, color: '#f1f5f9' }}>???? ???</span>
+            <span style={{ fontSize: 13, color: '#f1f5f9' }}>스케줄러 활성화</span>
           </label>
         </FieldRow>
         {settings.scheduler_enabled && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-            <FieldRow label="?? ?? ??" hint="?: 10:30">
+            <FieldRow label="오전 수집 시각" hint="기본: 10:30">
               <input type="time" value={settings.morning_collect_time}
                 onChange={e => setSettings(s => ({ ...s, morning_collect_time: e.target.value }))}
                 style={inputStyle} />
             </FieldRow>
-            <FieldRow label="?? ?? ??" hint="?: 15:30">
+            <FieldRow label="오후 수집 시각" hint="기본: 15:30">
               <input type="time" value={settings.afternoon_collect_time}
                 onChange={e => setSettings(s => ({ ...s, afternoon_collect_time: e.target.value }))}
                 style={inputStyle} />
             </FieldRow>
-            <FieldRow label="?? ?? ??" hint="?: 17:30">
+            <FieldRow label="마감 백업 시각" hint="기본: 17:30">
               <input type="time" value={settings.close_backup_time}
                 onChange={e => setSettings(s => ({ ...s, close_backup_time: e.target.value }))}
                 style={inputStyle} />
@@ -365,15 +365,15 @@ export default function Settings() {
           </div>
         )}
         <div style={{ fontSize: 11, color: '#475569' }}>
-          ????? ??(?~?)?? ?????.
+          스케줄러는 평일(월~금)에만 실행됩니다.
         </div>
       </SectionCard>
 
-      {/* ???? ?? */}
-      <SectionCard title="???? ?? (Chromium)">
+      {/* 브라우저 설정 */}
+      <SectionCard title="브라우저 설정 (Chromium)">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 13, color: chromiumOk ? '#22c55e' : '#ef4444' }}>
-            {chromiumOk === null ? '?? ?...' : chromiumOk ? '? Chromium ???' : '? Chromium ???'}
+            {chromiumOk === null ? '확인 중...' : chromiumOk ? '✓ Chromium 설치됨' : '✗ Chromium 미설치'}
           </span>
           {!chromiumOk && (
             <button
@@ -382,7 +382,7 @@ export default function Settings() {
               disabled={installingChromium}
               style={{ fontSize: 12 }}
             >
-              {installingChromium ? '?? ?...' : 'Chromium ??'}
+              {installingChromium ? '설치 중...' : 'Chromium 설치'}
             </button>
           )}
         </div>
@@ -396,28 +396,28 @@ export default function Settings() {
           </div>
         )}
         <div style={{ fontSize: 11, color: '#475569' }}>
-          ???? ??(??? ???, ?? ???)? ?????. ?? ?? ? ? 150MB ???????.
+          브라우저 자동화(주문 수집, 송장 업로드)에 사용됩니다. 최초 설치 시 약 150MB 다운로드됩니다.
         </div>
       </SectionCard>
 
-      {/* ??? ?? */}
-      <SectionCard title="??? ??">
+      {/* 데이터 복구 */}
+      <SectionCard title="데이터 복구">
         <div style={{ fontSize: 13, color: '#94a3b8' }}>
-          ?? PC?? ??? ???? ? PC? ?????. ?? SSD ?? ???? ?? ??? ?????.
+          다른 PC에서 백업한 데이터를 이 PC로 복구합니다. 별도 SSD 등 외장 드라이브를 연결한 후 진행해 주세요.
         </div>
         <div style={{
           padding: '10px 14px', borderRadius: 8,
           background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
           fontSize: 12, color: '#fca5a5'
         }}>
-          ? ?? ? ?? PC? ???? ?? ??? ???????.
+          ⚠ 복구 후 이 PC의 기존 데이터는 덮어쓰게 됩니다.
         </div>
         <button
           className="btn-secondary"
           onClick={() => setShowRestore(true)}
           style={{ alignSelf: 'flex-start' }}
         >
-          ?? ?? ?? ? ??
+          백업 드라이브 선택 후 복구
         </button>
       </SectionCard>
 
