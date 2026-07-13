@@ -65,6 +65,7 @@ export async function collectOrders(params: {
   new_targets: number
   duplicates: number
   changed_reviews: number
+  skipped?: boolean
   errors: string[]
   runId?: number
 }> {
@@ -73,28 +74,35 @@ export async function collectOrders(params: {
     return { success: false, collected: 0, new_targets: 0, duplicates: 0, changed_reviews: 0, errors: ['이미 실행 중입니다.'] }
   }
 
-  const idempotencyKey = `source=toever|date=${params.business_date}|round=${params.round}`
-  const existingRun = getRunByIdempotencyKey(idempotencyKey)
+  // manual round는 매 실행마다 고유 key → 중복 방지 없이 수시 실행 가능
+  // morning/afternoon(스케줄러)은 하루 1회 idempotency 유지
+  const isManual = params.round === 'manual'
+  const idempotencyKey = isManual
+    ? `source=toever|date=${params.business_date}|round=manual|ts=${Date.now()}`
+    : `source=toever|date=${params.business_date}|round=${params.round}`
 
-  if (existingRun?.status === 'SUCCESS') {
-    // 이미 성공한 경우 조기 반환 (같은 round 재실행 방지)
-    releaseLock(lockKey)
-    return {
-      success: true,
-      collected: 0,
-      new_targets: 0,
-      duplicates: 0,
-      changed_reviews: 0,
-      errors: [`이미 성공적으로 수집됨 (run_id=${existingRun.id})`],
-      runId: existingRun.id,
-    }
-  }
-
-  // FAILED run은 재시도 가능 — 기존 run을 RUNNING으로 리셋
   let run: AppRun
-  if (existingRun) {  // RUNNING/PARTIAL/FAILED all reset for retry
-    resetRunForRetry(existingRun.id)
-    run = getRunById(existingRun.id)!
+  if (!isManual) {
+    const existingRun = getRunByIdempotencyKey(idempotencyKey)
+    if (existingRun?.status === 'SUCCESS') {
+      releaseLock(lockKey)
+      return {
+        success: true,
+        collected: 0,
+        new_targets: 0,
+        duplicates: 0,
+        changed_reviews: 0,
+        skipped: true,
+        errors: [],
+        runId: existingRun.id,
+      }
+    }
+    if (existingRun) {
+      resetRunForRetry(existingRun.id)
+      run = getRunById(existingRun.id)!
+    } else {
+      run = createRun('COLLECT_ORDERS', params.business_date, idempotencyKey, params.round)
+    }
   } else {
     run = createRun('COLLECT_ORDERS', params.business_date, idempotencyKey, params.round)
   }

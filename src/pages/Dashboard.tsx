@@ -7,8 +7,6 @@ interface Props {
   onReviewBadgeUpdate: (count: number) => void
 }
 
-type CollectRound = 'morning' | 'afternoon' | 'manual'
-
 interface AutomationLog {
   time: string
   message: string
@@ -43,7 +41,6 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
   const [logs, setLogs]                     = useState<AutomationLog[]>([])
   const [dateFrom, setDateFrom]             = useState(todayKST())
   const [dateTo, setDateTo]                 = useState(todayKST())
-  const [round, setRound]                   = useState<CollectRound>('morning')
   const [ezadminDate, setEzadminDate]       = useState(todayKST())
   const [artifacts, setArtifacts]           = useState<FileArtifact[]>([])
   const [backupModalOpen, setBackupModalOpen] = useState(false)
@@ -109,21 +106,27 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
     }
 
     setRunning('collect')
-    addLog(`주문 수집 시작 (${round}, ${dateFrom}~${dateTo})`, 'info')
+    addLog(`주문 수집 시작 (${dateFrom}~${dateTo})`, 'info')
     try {
       const result = await api.orders.collect({
-        // business_date: 조회 시작일 기준 (dateFrom) - 업무일 기준
         business_date: dateFrom,
-        round,
+        round: 'manual',
         date_from: dateFrom,
         date_to: dateTo,
       })
       if (result.success && result.data) {
-        const d = result.data as { collected: number; new_targets: number; duplicates: number; changed_reviews: number; errors: string[] }
-        addLog(`수집 완료: 총 ${d.collected}건, 신규 ${d.new_targets}건, 중복제외 ${d.duplicates}건, 변경감지 ${d.changed_reviews}건`, 'success')
+        const d = result.data as { collected: number; new_targets: number; duplicates: number; changed_reviews: number; skipped?: boolean; errors: string[] }
+        if (d.skipped) {
+          addLog(`이미 수집된 데이터입니다. (신규 없음)`, 'info')
+        } else {
+          addLog(`수집 완료: 총 ${d.collected}건, 신규 ${d.new_targets}건, 중복제외 ${d.duplicates}건, 변경감지 ${d.changed_reviews}건`, 'success')
+        }
         if (d.errors && d.errors.length > 0) addLog(`경고: ${d.errors.join(' | ')}`, 'error')
       } else {
-        addLog(`수집 실패: ${result.error ?? '알 수 없는 오류'}`, 'error')
+        const errMsg = result.error
+          ?? (result.data as { errors?: string[] } | undefined)?.errors?.[0]
+          ?? '알 수 없는 오류'
+        addLog(`수집 실패: ${errMsg}`, 'error')
       }
     } finally {
       setRunning(null)
@@ -248,7 +251,7 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
           {/* 주문 수집 */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px', background: '#0f172a', borderRadius: 8 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8' }}>주문 수집</div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               <input
                 type="date"
                 value={dateFrom}
@@ -262,14 +265,6 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
                 onChange={e => setDateTo(e.target.value)}
                 style={{ flex: 1, minWidth: 120 }}
               />
-              <select
-                value={round}
-                onChange={e => setRound(e.target.value as CollectRound)}
-              >
-                <option value="morning">오전</option>
-                <option value="afternoon">오후</option>
-                <option value="manual">수동</option>
-              </select>
             </div>
             <button
               className="btn-primary"

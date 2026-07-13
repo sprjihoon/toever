@@ -3,6 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { screenshotPath, DIRS, sha256OfBuffer } from '../storage'
 import { logToeverAction, saveFileArtifact, addManualReview } from '../db/repositories'
+import { isChromiumInstalled, copyBundledChromiumIfNeeded } from '../playwright/browserManager'
 
 const TOEVER_BASE          = 'https://support.toever.co.kr'
 const LOGIN_URL            = `${TOEVER_BASE}/Login/login.jsp`
@@ -35,8 +36,20 @@ export async function launchBrowser(downloadDir: string): Promise<BrowserSession
   const dir = DIRS.logsScreenshots()
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
 
+  // Chromium이 없으면 번들에서 자동 복사 시도
+  if (!isChromiumInstalled()) {
+    console.log('[browser] Chromium 없음 → 번들에서 자동 복사 시도')
+    copyBundledChromiumIfNeeded()
+  }
+
+  if (!isChromiumInstalled()) {
+    throw new Error(
+      'Chromium이 설치되어 있지 않습니다. 설정 > 브라우저 설정에서 Chromium 설치 버튼을 눌러주세요.'
+    )
+  }
+
   browser = await chromium.launch({
-    headless: false,   // 운영자가 볼 수 있게 non-headless
+    headless: false,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   })
 

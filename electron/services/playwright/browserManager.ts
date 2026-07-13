@@ -57,7 +57,7 @@ export function isChromiumInstalled(): boolean {
  * 설치 패키지에 번들된 Chromium이 있으면 userData/browsers로 복사한다.
  * extraResources의 browsers/ 폴더가 있을 때만 동작한다.
  */
-function copyBundledChromiumIfNeeded(): boolean {
+export function copyBundledChromiumIfNeeded(): boolean {
   if (!app.isPackaged) return false
 
   const bundledBrowsersPath = path.join(process.resourcesPath ?? '', 'browsers')

@@ -140,13 +140,13 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       const settings = getAllSettings()
       const password = loadPassword()
       if (!settings['toever_id'] || !password) {
-        return { success: false, error: '??? ID/????? ???? ?????.' }
+        return { success: false, error: '투에버 ID/비밀번호가 설정되지 않았습니다.' }
       }
       if (!isStorageAvailable()) {
-        return { success: false, error: '???? ??? ? ????.' }
+        return { success: false, error: '저장소에 접근할 수 없습니다.' }
       }
       if (isLocked(`collect_orders:${params.business_date}:${params.round}`)) {
-        return { success: false, error: '?? ?? ????.' }
+        return { success: false, error: '이미 실행 중입니다.' }
       }
 
       const result = await collectOrders({
@@ -199,7 +199,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         },
       })
       updateRunStatus(run.id, result.success ? 'SUCCESS' : 'FAILED',
-        result.success ? `${result.matched}? ??` : result.errors.join('; '))
+        result.success ? `${result.matched}건 처리` : result.errors.join('; '))
       return { success: result.success, data: result }
     } catch (e) {
       updateRunStatus(run.id, 'FAILED', String(e))
@@ -210,7 +210,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('invoice:selectFile', async () => {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: '????? ?? ?? ??',
+        title: '이지어드민 송장 파일 선택',
         filters: [
           { name: 'Excel Files', extensions: ['xls', 'xlsx'] },
           { name: 'All Files', extensions: ['*'] },
@@ -218,7 +218,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         properties: ['openFile'],
       })
       if (result.canceled || result.filePaths.length === 0) {
-        return { success: false, error: '?? ?? ??' }
+        return { success: false, error: '선택 취소됨' }
       }
       return { success: true, data: result.filePaths[0] }
     } catch (e) {
@@ -264,17 +264,17 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       return {
         success: false,
         error: 'CONFIRM_REQUIRED',
-        message: '??? ??? ?????. confirmed:true ? ?????.',
+        message: '업로드를 확인해주세요. confirmed:true 를 전달하세요.',
       }
     }
 
     const settings = getAllSettings()
     const password = loadPassword()
     if (!settings['toever_id'] || !password) {
-      return { success: false, error: '??? ID/????? ???? ?????.' }
+      return { success: false, error: '투에버 ID/비밀번호가 설정되지 않았습니다.' }
     }
     if (isLocked('upload_toever_invoice')) {
-      return { success: false, error: '?? ?? ????.' }
+      return { success: false, error: '이미 실행 중입니다.' }
     }
 
     const dryRun = params?.dryRun ?? false
@@ -292,9 +292,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         },
       })
       const summary = result.dryRun
-        ? 'DRY-RUN ?? (??? ? ?)'
+        ? 'DRY-RUN 완료 (실제 업로드 없음)'
         : result.success
-          ? `${result.uploaded}? ??? ??`
+          ? `${result.uploaded}건 송장 업로드`
           : result.errors.join('; ')
       updateRunStatus(run.id, result.success ? 'SUCCESS' : 'FAILED', summary)
       return { success: result.success, data: result }
@@ -339,23 +339,23 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       return {
         success: false,
         error: 'CONFIRM_REQUIRED',
-        message: '??? ??? ?????. confirmed:true ? ?????.',
+        message: '출고지시를 확인해주세요. confirmed:true 를 전달하세요.',
       }
     }
 
     const settings = getAllSettings()
     const password = loadPassword()
     if (!settings['toever_id'] || !password) {
-      return { success: false, error: '??? ID/????? ???? ?????.' }
+      return { success: false, error: '투에버 ID/비밀번호가 설정되지 않았습니다.' }
     }
     if (isLocked('storeout_instruct')) {
-      return { success: false, error: '?? ?? ????.' }
+      return { success: false, error: '이미 실행 중입니다.' }
     }
 
     const dryRun = params?.dryRun ?? false
     const orders = getOrdersForStoreout()
     if (orders.length === 0) {
-      return { success: false, error: '?????? ?? ??? ????.' }
+      return { success: false, error: '출고지시 대상 주문이 없습니다.' }
     }
 
     const poNos  = orders.map(o => o.toever_order_no)
@@ -378,15 +378,15 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
         mainWindow?.webContents.send('automation:event', {
           event: 'progress',
-          data: { step: dryRun ? '[DRY-RUN] ?????? ?? ?? ?...' : '?????? ?? ?...' },
+          data: { step: dryRun ? '[DRY-RUN] 출고지시 실행 중...' : '출고지시 실행 중...' },
         })
 
         const result = await processStoreoutInstruction(page, poNos, run.id, dryRun)
         const summary = result.dryRun
-          ? `DRY-RUN: ${result.processedPoNos.length}? ?? ??`
+          ? `DRY-RUN: ${result.processedPoNos.length}건 처리 완료`
           : result.success
-            ? `${result.processedPoNos.length}? ??`
-            : `??/???: ${[...result.failedPoNos, ...result.unclearPoNos].join(', ')}`
+            ? `${result.processedPoNos.length}건 처리`
+            : `실패/불명: ${[...result.failedPoNos, ...result.unclearPoNos].join(', ')}`
         updateRunStatus(run.id, result.success ? 'SUCCESS' : 'PARTIAL', summary)
         return { success: result.success, data: result }
       } finally {
@@ -514,7 +514,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         shell.showItemInFolder(filePath)
         return { success: true }
       }
-      return { success: false, error: `??? ????: ${filePath}` }
+      return { success: false, error: `파일 없음: ${filePath}` }
     } catch (e) {
       return { success: false, error: String(e) }
     }
@@ -535,7 +535,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         await shell.openPath(folderPath)
         return { success: true }
       }
-      return { success: false, error: '???? ??? ? ????.' }
+      return { success: false, error: '폴더를 찾을 수 없습니다.' }
     } catch (e) {
       return { success: false, error: String(e) }
     }
@@ -544,12 +544,12 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('fs:selectFolder', async (_e, options?: { title?: string; defaultPath?: string }) => {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: options?.title ?? '?? ??',
+        title: options?.title ?? '폴더 선택',
         defaultPath: options?.defaultPath,
         properties: ['openDirectory'],
       })
       if (result.canceled || result.filePaths.length === 0) {
-        return { success: false, error: '???' }
+        return { success: false, error: '취소됨' }
       }
       return { success: true, data: result.filePaths[0] }
     } catch (e) {
@@ -564,12 +564,12 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('backup:selectRestoreFolder', async () => {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: '?? ?? ??',
+        title: '백업 폴더 선택',
         properties: ['openDirectory'],
-        buttonLabel: '? ??? ??',
+        buttonLabel: '이 폴더로 복원',
       })
       if (result.canceled || result.filePaths.length === 0) {
-        return { success: false, error: '???' }
+        return { success: false, error: '취소됨' }
       }
       return { success: true, data: result.filePaths[0] }
     } catch (e) {
