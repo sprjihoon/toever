@@ -16,6 +16,12 @@ app.disableHardwareAcceleration()
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
+// 앱이 이미 실행 중이면 두 번째 인스턴스 즉시 종료
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+}
+
 let mainWindow: BrowserWindow | null = null
 
 function createWindow(): void {
