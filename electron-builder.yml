@@ -41,10 +41,15 @@ asarUnpack:
 # native 모듈 재빌드 (better-sqlite3)
 npmRebuild: true
 
-# 추가 리소스 (아이콘 등)
+# 추가 리소스 (아이콘 + 번들 Chromium)
 extraResources:
   - from: resources/
     to: resources/
     filter:
       - "**/*"
       - "!.gitkeep"
+  # Chromium을 설치 파일에 번들 — 설치 후 다운로드 불필요
+  - from: build-browsers/
+    to: browsers/
+    filter:
+      - "**/*"

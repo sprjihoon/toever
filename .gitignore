@@ -10,6 +10,9 @@ logs/
 *.env
 .env.*
 
+# 빌드용 번들 Chromium (대용량, git 제외)
+build-browsers/
+
 # 런타임 생성 파일
 D:/SpringToeverOps/
 E:/SpringToeverOpsBackup/
