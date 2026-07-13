@@ -247,24 +247,26 @@ export async function collectOrders(params: {
         if (isNew) {
           insertOrderItems(orderId, itemRows)
         } else {
-          // 출고 진행 중인 주문은 상태·아이템 변경 금지
+          // 기존 주문 상태 보호 목록 — 이 상태인 주문은 절대 상태 강등 금지
           const PROTECTED_STATUSES: string[] = [
             'EXPORTED_TO_EZADMIN', 'INVOICE_IMPORTED', 'TOEVER_INVOICE_READY',
             'TOEVER_INVOICE_UPLOADED', 'STOREOUT_INSTRUCTED',
+            'CANCELLED', 'RETURN_REQUESTED', 'ON_HOLD',
           ]
-          if (!PROTECTED_STATUSES.includes(existingStatus ?? '')) {
-            // 상태 업데이트 (변경→ORDER_CHANGED_REVIEW 등)
-            // NEW_SHIPMENT_TARGET는 보호: 재수집해도 DUPLICATE_SKIPPED로 내려서는 안 됨
+
+          if (isChanged) {
+            // 내용 변경 감지: 상태 변경 금지 (manual_review는 filterNewShipmentTargets에서 등록됨)
+            // 변경 감지는 알림 목적, 자동 재출고 또는 상태 강등 절대 불가
+            // 아이템 갱신도 하지 않음 (출고 대상 아님)
+          } else if (!PROTECTED_STATUSES.includes(existingStatus ?? '')) {
+            // 중복/신규 처리: PROTECTED 아닌 경우에만 상태 업데이트
+            // NEW_SHIPMENT_TARGET 보호: 재수집 시 DUPLICATE_SKIPPED로 강등 금지
             const NEW_TARGET_PROTECTED: string[] = ['NEW_SHIPMENT_TARGET']
             if (isDuplicate && NEW_TARGET_PROTECTED.includes(existingStatus ?? '')) {
-              // 동일 내용의 NEW_SHIPMENT_TARGET → 상태 유지 (강등 금지)
+              // 동일 내용의 NEW_SHIPMENT_TARGET → 상태 유지
             } else {
               updateOrderStatus(orderId, status)
             }
-          }
-          // 주문 내용 변경 시 아이템도 갱신
-          if (isChanged) {
-            insertOrderItems(orderId, itemRows)
           }
         }
       }
@@ -475,6 +477,58 @@ export async function importEzadminInvoice(params: {
 // ============================================================
 // 투에버 송장 업로드
 // ============================================================
+
+/**
+ * 오늘의 일일 송장 업로드 현황 조회
+ * - 대기 중인 송장 건수 + 미리보기
+ * - 오늘 이미 업로드 완료됐는지 여부
+ */
+export function getDailyInvoiceStatus(today: string): {
+  pendingCount: number
+  uploadedToday: boolean
+  lastUploadAt: string | null
+  lastUploadCount: number
+  pendingItems: { order_no: string; invoice_no: string; recipient: string }[]
+} {
+  const db = getDb()
+
+  // 오늘 성공한 실제(non-dryRun) UPLOAD_TOEVER_INVOICE run 조회
+  // idempotency_key가 ':dry'로 끝나는 것은 dryRun 실행이므로 제외
+  const lastRun = db.prepare(`
+    SELECT summary, finished_at
+    FROM app_run
+    WHERE run_type = 'UPLOAD_TOEVER_INVOICE'
+      AND business_date = ?
+      AND status = 'SUCCESS'
+      AND idempotency_key NOT LIKE '%:dry'
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(today) as { summary: string | null; finished_at: string | null } | undefined
+
+  const uploadedToday = !!lastRun
+
+  // summary 형식: "N건 업로드 성공" — 앞 숫자만 추출 (uploaded=N)
+  let lastUploadCount = 0
+  if (lastRun?.summary) {
+    const match = lastRun.summary.match(/^(\d+)/)
+    if (match) lastUploadCount = parseInt(match[1], 10)
+  }
+
+  const orders = getOrdersForToeverInvoiceUpload()
+  const pendingItems = orders.map(o => ({
+    order_no:   o.toever_order_no,
+    invoice_no: o.latest_invoice_no ?? '',
+    recipient:  o.receiver_name     ?? '',
+  }))
+
+  return {
+    pendingCount: orders.length,
+    uploadedToday,
+    lastUploadAt: lastRun?.finished_at ?? null,
+    lastUploadCount,
+    pendingItems,
+  }
+}
 
 /**
  * 송장 업로드 대상 목록만 반환 (브라우저 없음, 상태 변경 없음)

@@ -28,12 +28,15 @@ files:
   - "!**/*.ts"
   - "!**/node_modules/.cache/**"
 
-# better-sqlite3 native 모듈은 asar 밖에 위치해야 함
+# better-sqlite3 native 모듈과 playwright CLI는 asar 밖에 위치해야 함
+# (better-sqlite3: native addon, playwright: child_process spawn으로 실행됨)
 asar: true
 asarUnpack:
   - "node_modules/better-sqlite3/**"
   - "node_modules/bindings/**"
   - "node_modules/file-uri-to-path/**"
+  - "node_modules/playwright/**"
+  - "node_modules/playwright-core/**"
 
 # native 모듈 재빌드 (better-sqlite3)
 npmRebuild: true

@@ -1,59 +1,35 @@
 /**
  * 중복 출고 방지 필터
  *
- * 같은 주문번호가 여러 상품 라인(행)으로 들어올 수 있으므로
- * 먼저 order_no 기준으로 그룹화한 뒤 처리한다.
+ * 최우선 원칙:
+ *   투에버 주문번호(toever_order_no)가 이미 DB에 존재하면,
+ *   상품/옵션/수량/주소/수취인/배송메시지가 변경되었더라도
+ *   절대 신규 출고 대상(new_targets)에 포함하지 않는다.
  *
  * 처리 결과:
- * - NEW_SHIPMENT_TARGET : DB에 없는 신규 주문
- * - DUPLICATE_SKIPPED   : 이미 처리 중인 동일 내용 주문
- * - ORDER_CHANGED_REVIEW: 같은 주문번호인데 내용 변경 감지 → 수동검토
+ * - new_targets        : DB에 없는 완전 신규 주문만 포함
+ * - duplicates         : 이미 DB에 있는 주문 (동일 내용)
+ * - changed_reviews    : 이미 DB에 있는 주문 (내용 변경 감지, 알림 목적)
+ *                        → 상태 변경 없음, manual_review_queue 등록만 수행
+ *
+ * 상태 변경 금지:
+ *   이 필터는 DB 주문 상태를 절대 변경하지 않는다.
+ *   변경 감지(changed_reviews)는 알림/검토 목적이며 자동 재출고 목적이 아니다.
  */
 
-import { getOrderByOrderNo, updateOrderStatus, addManualReview, hasOpenReview } from '../db/repositories'
+import { getOrderByOrderNo, addManualReview, hasOpenReview } from '../db/repositories'
 import { computeOrderHash } from '../parser/toeverOrderParser'
 import type { ToeverOrderRow } from '../../../shared/types'
 
 export interface FilterResult {
-  /** 고유 주문번호 기준, 신규 출고 대상인 첫 번째 행들 */
+  /** DB에 없는 완전 신규 주문 (첫 번째 행) */
   new_targets: ToeverOrderRow[]
-  /** 중복으로 건너뛸 고유 주문번호 목록 */
+  /** 이미 DB에 있는 주문 — 동일 내용, 중복 스킵 */
   duplicates: string[]
-  /** 내용 변경 감지된 고유 주문번호 목록 */
+  /** 이미 DB에 있는 주문 — 내용 변경 감지, manual_review 등록, 출고 차단 */
   changed_reviews: string[]
   errors: string[]
 }
-
-/** 이 상태의 주문은 이미 출고 프로세스에 있으므로 재처리 금지 */
-const SKIP_STATUSES = new Set([
-  'EXPORTED_TO_EZADMIN',
-  'INVOICE_IMPORTED',
-  'TOEVER_INVOICE_READY',
-  'TOEVER_INVOICE_UPLOADED',
-  'STOREOUT_INSTRUCTED',
-  'CANCELLED',
-  'RETURN_REQUESTED',
-  'ON_HOLD',
-  'MANUAL_REVIEW',
-])
-
-/** 이 상태이면 중복(같은 내용)으로 판단 */
-const DUPLICATE_STATUSES = new Set([
-  'COLLECTED',
-  'NEW_SHIPMENT_TARGET',
-  'DUPLICATE_SKIPPED',
-  'ORDER_CHANGED_REVIEW',
-  'ERROR',
-])
-
-/**
- * 이 상태이면 배치 취소된 주문 — 내용 비교 후 재출고 가능
- * SKIP_STATUSES에 포함하면 재출고 불가능, DUPLICATE_STATUSES에 포함하면
- * 같은 내용이어도 DUPLICATE_SKIPPED가 되어 버림 → 별도 처리 필요
- */
-const REPROCESS_STATUSES = new Set([
-  'EZADMIN_BATCH_CANCELLED',
-])
 
 /**
  * 여러 상품 라인을 포함한 주문 그룹의 해시를 계산한다.
@@ -93,68 +69,37 @@ export function filterNewShipmentTargets(
     const existing = getOrderByOrderNo(orderNo)
 
     if (!existing) {
-      // 완전 신규
+      // 완전 신규 — DB에 없는 경우만 신규 출고 대상
       new_targets.push(first)
       continue
     }
 
-    if (SKIP_STATUSES.has(existing.status)) {
-      // 이미 출고 진행 중 → 건너뜀
+    // ── 이미 DB에 존재하는 주문번호 ──────────────────────────────
+    // 어떤 상태든, 내용이 같든 다르든 절대 new_targets에 포함하지 않는다.
+
+    const newHash = computeGroupHash(first, groupRows)
+
+    if (existing.hash_snapshot === newHash) {
+      // 동일 내용 → 중복 스킵 (상태 변경 없음)
       duplicates.push(orderNo)
       continue
     }
 
-    if (REPROCESS_STATUSES.has(existing.status)) {
-      // 배치 취소 주문 → 내용 비교 후 재출고 또는 수동검토
-      const newHash = computeGroupHash(first, groupRows)
-      if (existing.hash_snapshot === newHash) {
-        // 동일 내용 → 신규 출고 대상으로 재처리 (재업로드 허용)
-        new_targets.push(first)
-      } else {
-        // 내용 변경 감지 → 수동검토 (배치 취소 + 내용 변경)
-        changed_reviews.push(orderNo)
-        updateOrderStatus(existing.id, 'ORDER_CHANGED_REVIEW')
-        if (!hasOpenReview(orderNo, 'ORDER_CHANGED_REVIEW')) {
-          addManualReview({
-            review_type:        'ORDER_CHANGED_REVIEW',
-            severity:           'HIGH',
-            toever_order_no:    orderNo,
-            run_id,
-            error_message:      '배치 취소 주문인데 수취인/주소/상품/수량 중 하나가 변경됨',
-            recommended_action: '기존 주문과 신규 수집 주문을 비교하여 수동 확인 필요',
-          })
-        }
-      }
-      continue
+    // 내용 변경 감지 → 알림/검토 목적으로 manual_review 등록
+    // 상태 변경 금지 — 자동 재출고 절대 불가
+    changed_reviews.push(orderNo)
+    if (!hasOpenReview(orderNo, 'ORDER_CHANGED_REVIEW')) {
+      addManualReview({
+        review_type:        'ORDER_CHANGED_REVIEW',
+        severity:           'HIGH',
+        toever_order_no:    orderNo,
+        run_id,
+        error_message:      `주문번호 동일, 내용 변경 감지 (기존 상태: ${existing.status}). ` +
+                            '수취인/주소/상품/수량/배송메시지 중 하나가 변경됨',
+        recommended_action: '기존 주문과 신규 수집 내용을 비교하여 수동 확인 후 처리',
+      })
     }
-
-    if (DUPLICATE_STATUSES.has(existing.status)) {
-      // 이전에 수집된 주문 → 내용 비교
-      const newHash = computeGroupHash(first, groupRows)
-
-      if (existing.hash_snapshot === newHash) {
-        // 동일 내용 → 중복
-        duplicates.push(orderNo)
-      } else {
-        // 내용 변경 감지 → 수동검토 (중복 리뷰 방지)
-        changed_reviews.push(orderNo)
-        updateOrderStatus(existing.id, 'ORDER_CHANGED_REVIEW')
-        if (!hasOpenReview(orderNo, 'ORDER_CHANGED_REVIEW')) {
-          addManualReview({
-            review_type:        'ORDER_CHANGED_REVIEW',
-            severity:           'HIGH',
-            toever_order_no:    orderNo,
-            run_id,
-            error_message:      '같은 주문번호인데 수취인/주소/상품/수량 중 하나가 변경됨',
-            recommended_action: '기존 주문과 신규 수집 주문을 비교하여 수동 확인 필요',
-          })
-        }
-      }
-      continue
-    }
-
-    // 알 수 없는 상태 → 신규로 처리
-    new_targets.push(first)
+    // 출고 차단: changed_reviews는 duplicates와 마찬가지로 new_targets에 포함하지 않음
   }
 
   return { new_targets, duplicates, changed_reviews, errors }

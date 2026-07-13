@@ -19,7 +19,9 @@ declare global {
       invoice: {
         importEzadmin: (params: unknown) => Promise<{ success: boolean; data?: unknown; error?: string }>
         selectFile: () => Promise<{ success: boolean; data?: string; error?: string }>
-        uploadToever: () => Promise<{ success: boolean; data?: unknown; error?: string }>
+        uploadToever: (params?: { confirmed?: boolean; dryRun?: boolean }) => Promise<{ success: boolean; data?: unknown; error?: string }>
+        previewUpload: () => Promise<{ success: boolean; data?: unknown; error?: string }>
+        getDailyStatus: () => Promise<{ success: boolean; data?: unknown; error?: string }>
       }
       batch: {
         getActive: () => Promise<{ success: boolean; data?: unknown; error?: string }>

@@ -13,7 +13,7 @@ Windows 데스크탑 애플리케이션 (Electron + React + TypeScript)
 | 주문 수집 | 투에버 Support에서 주문 데이터를 자동 다운로드, DB 저장, 중복 방지 |
 | 이지어드민 연동 | 신규 출고 대상 주문을 이지어드민 업로드용 Excel 파일로 생성 |
 | 송장 Import | 이지어드민에서 다운로드한 확장주문검색 파일을 자동 매칭·저장 |
-| 투에버 송장 업로드 | 매칭된 송장번호를 투에버 Support에 자동 업로드 |
+| 투에버 송장 업로드 | 하루치 송장을 모아 한 번에 일괄 업로드 (수동 버튼, 하루 1회) — 미리보기 확인 후 확정 |
 | 수동검토 큐 | 복수 송장·주문 변경 감지 등 자동 처리 불가 건을 별도 큐로 관리 |
 | 백업 | SQLite backup API로 DB를 안전하게, 파일 전체를 외장 SSD로 백업 |
 | 데이터 복원 | 백업 폴더를 선택하면 어떤 PC에서도 동일 데이터로 복원 |
@@ -135,8 +135,9 @@ D:\SpringToeverOps\
 [이지어드민 업로드 파일 생성] → [이지어드민에서 출고 처리] (수동)
     ↓ 이지어드민 확장주문검색 파일 다운로드
 [이지어드민 송장 Import] → 주문번호 자동 매칭 → INVOICE_IMPORTED 누적
-    ↓ (오전/오후 여러 차례 반복 가능)
-[투에버 송장 업로드] → 미업로드 건만 추출 → TOEVER_INVOICE_UPLOADED
+    ↓ (하루 중 여러 차례 반복 가능 — 누적됨)
+[투에버 일일 일괄 업로드] → 수동 버튼 클릭 → 미리보기 확인 → 확정 → 전체 일괄 업로드
+    ↓ 업로드 완료 건 → TOEVER_INVOICE_UPLOADED (자동 제외)
 ```
 
 ---
@@ -277,6 +278,7 @@ npm run build:dir
 | 1.0.4 | 2026-07-09 | 상태 변경 작업 Confirm/Dry-run 안전장치 추가: 송장 업로드·출고작업지시 모두 confirmed=true 없으면 실행 차단, dryRun 기본값 적용, 결과 불명확 시 수동검토 큐 등록 |
 | 1.0.5 | 2026-07-09 | 투에버 송장 업로드 결과 판별 로직 확정 (7가지 기준): 성공>0→SUCCESS, 성공=0→FAIL, 성공=0 스킵=0→TOEVER_UPLOAD_NO_ROWS, 파싱불가→UNCLEAR+수동검토 큐, 자동재시도 제거 |
 | 1.0.6 | 2026-07-09 | `savePdfReport` PDF 저장 방식 변경: page.pdf() 폐기 → OZ Viewer 저장 버튼(btnSAVEAS) 클릭 → select[1] Adobe PDF 선택 → 확인 클릭 → Playwright download 이벤트 수신 (74 KB, .pdf 확인됨) |
+| 1.0.7 | 2026-07-13 | 투에버 송장 업로드 하루 1회 일괄 처리 확정: `getDailyInvoiceStatus()` 추가(오늘 업로드 여부·대기 건수·미리보기 목록), `invoice:getDailyStatus` IPC 추가, `uploadToever` confirmed 파라미터 누락 버그 수정, InvoiceManager UI 전면 개편(일일 현황 배너·미리보기 테이블·2단계 확인 흐름·dryRun 감지 오류 수정) |
 
 ---
 

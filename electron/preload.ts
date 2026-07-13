@@ -29,7 +29,10 @@ const api = {
   invoice: {
     importEzadmin: (params: unknown) => ipcRenderer.invoke('invoice:importEzadmin', params),
     selectFile: () => ipcRenderer.invoke('invoice:selectFile'),
-    uploadToever: () => ipcRenderer.invoke('invoice:uploadToever'),
+    uploadToever: (params?: { confirmed?: boolean; dryRun?: boolean }) =>
+      ipcRenderer.invoke('invoice:uploadToever', params),
+    previewUpload: () => ipcRenderer.invoke('invoice:previewUpload'),
+    getDailyStatus: () => ipcRenderer.invoke('invoice:getDailyStatus'),
   },
 
   // 배치

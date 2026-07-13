@@ -32,6 +32,8 @@ interface Props {
 type Step =
   | 'CHOICE'
   | 'SETUP_PATH'
+  | 'CREDENTIALS'
+  | 'CHROMIUM'
   | 'SELECTING'
   | 'VALIDATING'
   | 'CONFIRM'
@@ -51,16 +53,31 @@ export default function FirstRunModal({ onClose }: Props) {
   const [storagePath, setStoragePath] = useState<string>('')
   const [savingPath, setSavingPath]   = useState(false)
 
+  // 인증 정보
+  const [toeverId, setToeverId]         = useState<string>('')
+  const [toeverPw, setToeverPw]         = useState<string>('')
+  const [showPw, setShowPw]             = useState(false)
+  const [savingCreds, setSavingCreds]   = useState(false)
+
+  // Chromium 설치
+  const [chromiumOk, setChromiumOk]     = useState<boolean | null>(null)
+  const [installingChromium, setInstallingChromium] = useState(false)
+  const [chromiumLog, setChromiumLog]   = useState<string[]>([])
+  const [chromiumDone, setChromiumDone] = useState(false)
+
   const addLog = useCallback((msg: string) => {
     setProgressLog(prev => [...prev, `[${new Date().toLocaleTimeString('ko-KR')}] ${msg}`])
   }, [])
 
-  // 기본 경로 로딩
+  // 기본 경로 로딩 + Chromium 상태 확인
   useEffect(() => {
     const api = window.toeverApi
     if (!api) return
     api.appControl.getDefaultStoragePath?.().then(r => {
       if (r?.success && r.data) setStoragePath(r.data as string)
+    }).catch(() => {})
+    api.playwright?.isChromiumInstalled().then(r => {
+      if (r?.success) setChromiumOk(r.data as boolean)
     }).catch(() => {})
   }, [])
 
@@ -79,7 +96,6 @@ export default function FirstRunModal({ onClose }: Props) {
   const handleConfirmNewStart = async () => {
     const api = window.toeverApi
     if (!api || !storagePath) {
-      // 경로 없이 닫으면 그냥 완료 처리
       await api?.appControl.markSetupComplete?.()
       onClose()
       return
@@ -87,21 +103,64 @@ export default function FirstRunModal({ onClose }: Props) {
 
     setSavingPath(true)
     try {
-      const r = await api.settings.save({ storage_base_path: storagePath })
-      // 최초 설정 완료 플래그 저장 — 재시작 후에도 모달이 다시 뜨지 않게
-      await api.appControl.markSetupComplete?.()
-      const d = r.data as { needsRestart?: boolean } | undefined
-      if (d?.needsRestart) {
-        // 경로가 기본값과 달라서 재시작 필요
-        await api.appControl.relaunch()
-      } else {
-        onClose()
-      }
+      await api.settings.save({ storage_base_path: storagePath })
+      setStep('CREDENTIALS')
     } catch {
-      await api.appControl.markSetupComplete?.()
-      onClose()
+      setStep('CREDENTIALS')
     } finally {
       setSavingPath(false)
+    }
+  }
+
+  const handleSaveCredentials = async () => {
+    const api = window.toeverApi
+    if (!api) return
+    setSavingCreds(true)
+    try {
+      if (toeverId.trim() || toeverPw.trim()) {
+        await api.settings.save({
+          toever_id: toeverId.trim(),
+          toever_password: toeverPw.trim(),
+        })
+      }
+    } finally {
+      setSavingCreds(false)
+      setStep('CHROMIUM')
+    }
+  }
+
+  const handleInstallChromium = async () => {
+    const api = window.toeverApi
+    if (!api) return
+    setInstallingChromium(true)
+    setChromiumLog([])
+    const unsub = api.playwright?.onInstallProgress((p) => {
+      const prog = p as { message: string; done: boolean }
+      setChromiumLog(prev => [...prev, prog.message])
+    })
+    const r = await api.playwright?.installChromium()
+    unsub?.()
+    setInstallingChromium(false)
+    if (r?.success) {
+      setChromiumOk(true)
+      setChromiumDone(true)
+      setChromiumLog(prev => [...prev, '✓ Chromium 설치 완료'])
+    } else {
+      setChromiumLog(prev => [...prev, `✗ 설치 실패: ${r?.error}`])
+    }
+  }
+
+  const handleFinishSetup = async () => {
+    const api = window.toeverApi
+    if (!api) return
+    await api.appControl.markSetupComplete?.()
+    // 경로 변경이 있었을 경우 재시작 필요 여부 확인
+    const allSettings = await api.settings.getAll().catch(() => null)
+    const savedPath = (allSettings?.data as Record<string, string> | undefined)?.storage_base_path
+    if (savedPath && savedPath !== storagePath) {
+      await api.appControl.relaunch()
+    } else {
+      onClose()
     }
   }
 
@@ -206,14 +265,16 @@ export default function FirstRunModal({ onClose }: Props) {
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 28, fontWeight: 700, color: '#3b82f6' }}>Spring Toever Ops</div>
           <div style={{ color: '#64748b', fontSize: 13, marginTop: 6 }}>
-            {step === 'CHOICE'     && '처음 실행되었습니다. 시작 방법을 선택하세요.'}
-            {step === 'SETUP_PATH' && '데이터 저장 폴더를 선택하세요.'}
-            {step === 'SELECTING'  && '폴더를 선택하는 중...'}
-            {step === 'VALIDATING' && '백업 폴더를 확인하는 중...'}
-            {step === 'CONFIRM'    && '복원 정보를 확인하세요.'}
-            {step === 'RESTORING'  && '데이터를 복원하는 중...'}
-            {step === 'DONE'       && '복원 완료! 앱을 재시작합니다...'}
-            {step === 'ERROR'      && '문제가 발생했습니다.'}
+            {step === 'CHOICE'      && '처음 실행되었습니다. 시작 방법을 선택하세요.'}
+            {step === 'SETUP_PATH'  && '데이터 저장 폴더를 선택하세요. (1/3)'}
+            {step === 'CREDENTIALS' && '투에버 로그인 정보를 입력하세요. (2/3)'}
+            {step === 'CHROMIUM'    && '자동화 브라우저를 설치하세요. (3/3)'}
+            {step === 'SELECTING'   && '폴더를 선택하는 중...'}
+            {step === 'VALIDATING'  && '백업 폴더를 확인하는 중...'}
+            {step === 'CONFIRM'     && '복원 정보를 확인하세요.'}
+            {step === 'RESTORING'   && '데이터를 복원하는 중...'}
+            {step === 'DONE'        && '복원 완료! 앱을 재시작합니다...'}
+            {step === 'ERROR'       && '문제가 발생했습니다.'}
           </div>
         </div>
 
@@ -288,7 +349,147 @@ export default function FirstRunModal({ onClose }: Props) {
                 disabled={!storagePath || savingPath}
                 style={{ flex: 2 }}
               >
-                {savingPath ? '적용 중...' : '이 폴더로 시작하기'}
+                {savingPath ? '적용 중...' : '다음 →'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* CREDENTIALS 단계 */}
+        {step === 'CREDENTIALS' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{
+              padding: '12px 16px', borderRadius: 8,
+              background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)',
+            }}>
+              <div style={{ fontWeight: 600, color: '#f1f5f9', fontSize: 14, marginBottom: 8 }}>
+                🔑 투에버 Support 로그인 정보
+              </div>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12 }}>
+                주문 수집 및 송장 업로드에 사용됩니다. 나중에 설정에서 변경할 수 있습니다.
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <input
+                  type="text"
+                  value={toeverId}
+                  onChange={e => setToeverId(e.target.value)}
+                  style={inputStyle}
+                  placeholder="투에버 ID (이메일)"
+                  autoComplete="username"
+                />
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showPw ? 'text' : 'password'}
+                    value={toeverPw}
+                    onChange={e => setToeverPw(e.target.value)}
+                    style={{ ...inputStyle, paddingRight: 44 }}
+                    placeholder="비밀번호"
+                    autoComplete="current-password"
+                  />
+                  <button
+                    onClick={() => setShowPw(v => !v)}
+                    style={{
+                      position: 'absolute', right: 10, top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: '#64748b', fontSize: 13, padding: '2px 4px',
+                    }}
+                  >
+                    {showPw ? '숨김' : '표시'}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.15)' }}>
+              <div style={{ fontSize: 12, color: '#86efac' }}>
+                🔒 비밀번호는 Windows DPAPI로 암호화되어 이 PC에만 저장됩니다.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn-secondary" onClick={() => setStep('SETUP_PATH')} style={{ flex: 1 }}>
+                뒤로
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={() => setStep('CHROMIUM')}
+                style={{ flex: 1, fontSize: 12 }}
+              >
+                나중에 입력
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleSaveCredentials}
+                disabled={savingCreds || (!toeverId.trim() && !toeverPw.trim())}
+                style={{ flex: 2 }}
+              >
+                {savingCreds ? '저장 중...' : '저장 후 다음 →'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* CHROMIUM 단계 */}
+        {step === 'CHROMIUM' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{
+              padding: '12px 16px', borderRadius: 8,
+              background: chromiumOk
+                ? 'rgba(34,197,94,0.08)'
+                : 'rgba(59,130,246,0.08)',
+              border: chromiumOk
+                ? '1px solid rgba(34,197,94,0.2)'
+                : '1px solid rgba(59,130,246,0.2)',
+            }}>
+              <div style={{ fontWeight: 600, color: '#f1f5f9', fontSize: 14, marginBottom: 8 }}>
+                🌐 Chromium 브라우저
+              </div>
+              {chromiumOk ? (
+                <div style={{ fontSize: 13, color: '#86efac' }}>✓ 이미 설치되어 있습니다.</div>
+              ) : (
+                <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12 }}>
+                  투에버 웹 자동화에 필요한 브라우저입니다. (~150MB, 인터넷 연결 필요)
+                  <br />설치 후 재설치해도 브라우저 데이터는 유지됩니다.
+                </div>
+              )}
+              {!chromiumOk && !chromiumDone && (
+                <button
+                  className="btn-primary"
+                  onClick={handleInstallChromium}
+                  disabled={installingChromium}
+                  style={{ width: '100%', marginTop: 4 }}
+                >
+                  {installingChromium ? '설치 중...' : 'Chromium 설치하기'}
+                </button>
+              )}
+            </div>
+
+            {chromiumLog.length > 0 && (
+              <div style={{
+                background: '#0f172a', borderRadius: 8, padding: 10,
+                maxHeight: 140, overflowY: 'auto',
+                fontFamily: 'monospace', fontSize: 11, color: '#94a3b8',
+                display: 'flex', flexDirection: 'column', gap: 2,
+              }}>
+                {chromiumLog.map((line, i) => (
+                  <div key={i} style={{ color: line.startsWith('✓') ? '#86efac' : line.startsWith('✗') ? '#fca5a5' : '#94a3b8' }}>
+                    {line}
+                  </div>
+                ))}
+                {installingChromium && <div style={{ color: '#3b82f6' }}>▌</div>}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn-secondary" onClick={() => setStep('CREDENTIALS')} style={{ flex: 1 }}>
+                뒤로
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleFinishSetup}
+                disabled={installingChromium}
+                style={{ flex: 2 }}
+              >
+                {chromiumOk || chromiumDone ? '설정 완료 →' : '건너뛰고 완료'}
               </button>
             </div>
           </div>

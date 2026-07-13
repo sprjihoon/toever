@@ -14,7 +14,7 @@ import { getKSTDateString } from '../services/storage'
 import {
   collectOrders, generateEzadminUploadFile,
   importEzadminInvoice, uploadToeverInvoiceFile,
-  previewToeverInvoiceUpload,
+  previewToeverInvoiceUpload, getDailyInvoiceStatus,
   isLocked,
 } from '../services/toever/orchestrator'
 import { getOrdersForStoreout } from '../services/db/repositories'
@@ -230,7 +230,18 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ??? ?? ???
   // ============================================================
 
-  /** ??? ?? ?? ?? ?? (???? ??, ?? ?? ??) */
+  /** 일일 송장 업로드 현황 조회 (대기 건수 + 오늘 업로드 여부) */
+  ipcMain.handle('invoice:getDailyStatus', async () => {
+    try {
+      const today = getKSTDateString()
+      const status = getDailyInvoiceStatus(today)
+      return { success: true, data: status }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
+  /** 송장 업로드 대상 목록만 반환 (브라우저 없음, 상태 변경 없음) */
   ipcMain.handle('invoice:previewUpload', async () => {
     try {
       const preview = previewToeverInvoiceUpload()
