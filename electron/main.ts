@@ -11,6 +11,9 @@ import { readRestoreMarker } from './services/restore'
 // Playwright Chromium을 userData/browsers에 설치하도록 경로 먼저 설정
 initPlaywrightBrowserPath()
 
+// 일부 PC에서 GPU 가속으로 인한 검은 화면 방지
+app.disableHardwareAcceleration()
+
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
 let mainWindow: BrowserWindow | null = null
@@ -35,7 +38,7 @@ function createWindow(): void {
     mainWindow.loadURL('http://localhost:5173')
     mainWindow.webContents.openDevTools()
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+    mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'))
   }
 
   mainWindow.once('ready-to-show', () => {
