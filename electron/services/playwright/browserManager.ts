@@ -15,19 +15,30 @@ import { spawn } from 'child_process'
 let _initialized = false
 
 /**
- * Playwright 브라우저 경로를 userData 하위로 설정한다.
- * 앱 시작 시 반드시 호출해야 한다.
+ * Playwright 브라우저 경로를 설정한다.
+ * - 패키징 환경: userData/browsers (번들 Chromium 복사 대상)
+ * - 개발 환경: Playwright 기본 경로 사용 (ms-playwright / npx playwright install 위치)
  */
 export function initPlaywrightBrowserPath(): void {
   if (_initialized) return
-  const browsersPath = path.join(app.getPath('userData'), 'browsers')
-  process.env.PLAYWRIGHT_BROWSERS_PATH = browsersPath
+  if (app.isPackaged) {
+    const browsersPath = path.join(app.getPath('userData'), 'browsers')
+    process.env.PLAYWRIGHT_BROWSERS_PATH = browsersPath
+  }
+  // 개발 환경은 PLAYWRIGHT_BROWSERS_PATH를 건드리지 않음 → Playwright 기본 경로 사용
   _initialized = true
 }
 
 /** Playwright가 사용할 browsers 경로 */
 export function getBrowsersPath(): string {
-  return process.env.PLAYWRIGHT_BROWSERS_PATH ?? path.join(app.getPath('userData'), 'browsers')
+  if (process.env.PLAYWRIGHT_BROWSERS_PATH) {
+    return process.env.PLAYWRIGHT_BROWSERS_PATH
+  }
+  // 개발 환경: Playwright 기본 경로 (Windows: AppData\Local\ms-playwright)
+  if (process.platform === 'win32') {
+    return path.join(process.env.LOCALAPPDATA ?? '', 'ms-playwright')
+  }
+  return path.join(app.getPath('userData'), 'browsers')
 }
 
 /** Chromium 실행 파일이 존재하는지 확인 */
