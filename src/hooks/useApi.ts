@@ -4,6 +4,7 @@ declare global {
       settings: {
         getAll: () => Promise<{ success: boolean; data?: unknown; error?: string }>
         save: (s: unknown) => Promise<{ success: boolean; data?: unknown; error?: string }>
+        testLogin?: () => Promise<{ success: boolean; data?: unknown; error?: string }>
       }
       dashboard: {
         getStats: (today: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
@@ -12,6 +13,7 @@ declare global {
         search: (params: unknown) => Promise<{ success: boolean; data?: unknown; error?: string }>
         getDetail: (id: number) => Promise<{ success: boolean; data?: unknown; error?: string }>
         collect: (params: unknown) => Promise<{ success: boolean; data?: unknown; error?: string }>
+        clearToday?: (orderDate?: string) => Promise<{ success: boolean; data?: { cleared: number; preserved: number }; error?: string }>
       }
       ezadmin: {
         generateUploadFile: (date: string, round?: 'morning' | 'afternoon' | 'manual') => Promise<{ success: boolean; data?: unknown; error?: string }>
@@ -21,6 +23,7 @@ declare global {
         selectFile: () => Promise<{ success: boolean; data?: string; error?: string }>
         uploadToever: (params?: { confirmed?: boolean; dryRun?: boolean }) => Promise<{ success: boolean; data?: unknown; error?: string }>
         previewUpload: () => Promise<{ success: boolean; data?: unknown; error?: string }>
+        generatePreviewFile: () => Promise<{ success: boolean; data?: { filePath: string; rowCount: number; rows: Array<{ order_no: string; invoice_no: string; recipient: string }> }; error?: string }>
         getDailyStatus: () => Promise<{ success: boolean; data?: unknown; error?: string }>
       }
       batch: {
@@ -58,6 +61,7 @@ declare global {
         markSetupComplete?:      () => Promise<{ success: boolean; error?: string }>
         relaunch:                () => Promise<{ success: boolean; error?: string }>
         getDefaultStoragePath?:  () => Promise<{ success: boolean; data?: unknown; error?: string }>
+        getVersion?:             () => Promise<{ success: boolean; data?: string; error?: string }>
       }
       playwright: {
         isChromiumInstalled:  () => Promise<{ success: boolean; data?: unknown; error?: string }>
@@ -71,11 +75,14 @@ declare global {
         deleteTemplate: (id: number) => Promise<{ success: boolean; error?: string }>
         buildReport:    (params: unknown) => Promise<{ success: boolean; data?: unknown; error?: string }>
       }
-      manual: {
-        create:  (params: unknown)                     => Promise<{ success: boolean; data?: unknown; error?: string }>
-        update:  (id: number, params: unknown)         => Promise<{ success: boolean; error?: string }>
-        delete:  (id: number)                          => Promise<{ success: boolean; error?: string }>
-        getList: (params: unknown)                     => Promise<{ success: boolean; data?: unknown; error?: string }>
+      system: {
+        resetAll: (params?: { confirmed?: boolean }) => Promise<{ success: boolean; data?: { deletedFiles: number }; error?: string }>
+      }
+      holiday: {
+        getList:     (dateFrom?: string, dateTo?: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
+        addCompany:  (date: string, name: string)          => Promise<{ success: boolean; data?: unknown; error?: string }>
+        delete:      (id: number)                          => Promise<{ success: boolean; error?: string }>
+        syncFromApi: (years: number[])                     => Promise<{ success: boolean; data?: unknown; error?: string }>
       }
       onAutomationEvent: (cb: (event: string, data: unknown) => void) => () => void
     }

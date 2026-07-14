@@ -48,5 +48,21 @@ export function isValidInvoiceNo(value: string): boolean {
   return true
 }
 
+/** 투에버 정식 주문번호 형식 (숫자 19자리, 예: 0100012026070800002) */
+export const TOEVER_ORDER_NO_LENGTH = 19
+const TOEVER_ORDER_NO_RE = new RegExp(`^\\d{${TOEVER_ORDER_NO_LENGTH}}$`)
+
+/**
+ * 이지어드민 송장파일의 주문번호가 투에버 정식 주문번호 형식(숫자 19자리)인지 검사.
+ * - "_gift" 등 접미사가 붙은 사은품용 임시 주문번호
+ * - 길이가 다른 사내 관리용 코드
+ * 이런 값들은 투에버 실제 주문과 매칭될 수 없으므로 송장 import 대상에서 제외한다.
+ */
+export function isStandardToeverOrderNo(value: string): boolean {
+  if (!value) return false
+  if (isScientificNotationRisk(value)) return false
+  return TOEVER_ORDER_NO_RE.test(value)
+}
+
 // computeOrderHash는 toeverOrderParser.ts에서 export됩니다.
 // 이 파일에서는 중복 정의하지 않습니다.

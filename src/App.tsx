@@ -5,17 +5,15 @@ import ManualReview from './pages/ManualReview'
 import InvoiceManager from './pages/InvoiceManager'
 import Settings from './pages/Settings'
 import Reports from './pages/Reports'
-import ManualShipmentPage from './pages/ManualShipment'
 import FirstRunModal from './components/FirstRunModal'
 
-type Page = 'dashboard' | 'orders' | 'invoice' | 'review' | 'manual' | 'report' | 'settings'
+type Page = 'dashboard' | 'orders' | 'invoice' | 'review' | 'report' | 'settings'
 
 const NAV_ITEMS: { id: Page; label: string; icon: string }[] = [
   { id: 'dashboard', label: '대시보드', icon: '📊' },
   { id: 'orders', label: '주문 관리', icon: '📦' },
   { id: 'invoice', label: '송장 처리', icon: '🚚' },
   { id: 'review', label: '수동검토', icon: '🔍' },
-  { id: 'manual', label: '수기건 관리', icon: '✍️' },
   { id: 'report', label: '리포트', icon: '📈' },
   { id: 'settings', label: '설정', icon: '⚙️' },
 ]
@@ -108,7 +106,6 @@ export default function App() {
         {currentPage === 'review' && (
           <ManualReview onBadgeUpdate={setReviewBadge} />
         )}
-        {currentPage === 'manual' && <ManualShipmentPage />}
         {currentPage === 'report' && <Reports />}
         {currentPage === 'settings' && <Settings />}
       </main>

@@ -1,6 +1,6 @@
 {
   "name": "spring-toever-ops",
-  "version": "1.0.0",
+  "version": "1.1.15",
   "description": "투에버-이지어드민 주문·송장 자동화 운영 프로그램",
   "main": "dist-electron/electron/main.js",
   "scripts": {
@@ -13,7 +13,10 @@
     "build": "npm run build:electron && npm run build:renderer && electron-builder --config electron-builder.yml",
     "build:dir": "npm run build:electron && npm run build:renderer && electron-builder --dir --config electron-builder.yml",
     "preview": "vite preview",
-    "install:playwright": "npx playwright install chromium --with-deps"
+    "install:playwright": "npx playwright install chromium --with-deps",
+    "version:patch": "npm version patch",
+    "version:minor": "npm version minor",
+    "version:major": "npm version major"
   },
   "keywords": [],
   "author": "Spring Toever Ops",

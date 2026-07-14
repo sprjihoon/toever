@@ -21,6 +21,12 @@ interface DailyStatus {
   pendingItems: PendingItem[]
 }
 
+interface PreviewFileInfo {
+  filePath: string
+  rowCount: number
+  rows: Array<{ order_no: string; invoice_no: string; recipient: string }>
+}
+
 type UploadPhase = 'idle' | 'preview' | 'confirming' | 'uploading' | 'done'
 
 function formatKSTTime(isoString: string | null): string {
@@ -43,6 +49,8 @@ export default function InvoiceManager() {
 
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle')
   const [uploadResult, setUploadResult] = useState<StepResult | null>(null)
+  const [previewFile, setPreviewFile] = useState<PreviewFileInfo | null>(null)
+  const [previewError, setPreviewError] = useState<string | null>(null)
 
   const loadDailyStatus = useCallback(async () => {
     const api = window.toeverApi
@@ -79,17 +87,20 @@ export default function InvoiceManager() {
     try {
       const result = await api.invoice.importEzadmin({ file_path: selectedFile })
       if (result.success && result.data) {
-        const d = result.data as { matched: number; multi_invoice: number; orphan: number; warnings: string[] }
+        const d = result.data as { matched: number; multi_invoice: number; orphan: number; invalid_format: number; warnings: string[] }
         setStep1Result({
           success: true,
-          message: `매칭 완료: ${d.matched}건 / 복수송장 ${d.multi_invoice}건 / 미매칭 ${d.orphan}건`,
+          message: `매칭 완료: ${d.matched}건 / 복수송장 ${d.multi_invoice}건 / 미매칭 ${d.orphan}건${
+            d.invalid_format > 0 ? ` / 형식제외 ${d.invalid_format}건` : ''
+          }`,
           data: d,
         })
         // 가져온 후 일일 현황 갱신
         await loadDailyStatus()
-        // 업로드 단계를 초기화해 새 항목이 반영되도록
         setUploadPhase('idle')
         setUploadResult(null)
+        setPreviewFile(null)
+        setPreviewError(null)
       } else {
         setStep1Result({ success: false, message: result.error ?? 'import 실패' })
       }
@@ -99,9 +110,30 @@ export default function InvoiceManager() {
   }
 
   const handleShowPreview = async () => {
-    await loadDailyStatus()
-    setUploadPhase('preview')
-    setUploadResult(null)
+    const api = window.toeverApi
+    if (!api) return
+    setRunning('preview')
+    setPreviewError(null)
+    setPreviewFile(null)
+    try {
+      await loadDailyStatus()
+      const result = await api.invoice.generatePreviewFile()
+      if (result.success && result.data) {
+        setPreviewFile(result.data)
+        setUploadPhase('preview')
+        setUploadResult(null)
+      } else {
+        setPreviewError(result.error ?? '업로드 파일 미리보기 생성 실패')
+      }
+    } finally {
+      setRunning(null)
+    }
+  }
+
+  const handleOpenPreviewFile = async () => {
+    if (!previewFile?.filePath) return
+    const api = window.toeverApi
+    await api.fsExtra?.showInFolder(previewFile.filePath)
   }
 
   const handleConfirmUpload = async () => {
@@ -133,11 +165,15 @@ export default function InvoiceManager() {
 
   const handleCancelPreview = () => {
     setUploadPhase('idle')
+    setPreviewFile(null)
+    setPreviewError(null)
   }
 
   const handleReset = () => {
     setUploadPhase('idle')
     setUploadResult(null)
+    setPreviewFile(null)
+    setPreviewError(null)
     loadDailyStatus()
   }
 
@@ -354,22 +390,29 @@ export default function InvoiceManager() {
           </div>
         )}
 
-        {/* idle: 업로드 시작 버튼 */}
+        {/* idle: 업로드 파일 미리보기 */}
         {uploadPhase === 'idle' && (
-          <button
-            className="btn-primary"
-            onClick={handleShowPreview}
-            disabled={running !== null || pending === 0}
-            style={{ background: pending > 0 ? '#a855f7' : undefined }}
-          >
-            {pending > 0
-              ? `📋 업로드 목록 확인 (${pending}건)`
-              : '대기 송장 없음'}
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button
+              className="btn-primary"
+              onClick={handleShowPreview}
+              disabled={running !== null || pending === 0}
+              style={{ background: pending > 0 ? '#a855f7' : undefined, alignSelf: 'flex-start' }}
+            >
+              {running === 'preview'
+                ? '업로드 파일 생성 중...'
+                : pending > 0
+                  ? `📋 업로드 파일 미리보기 (${pending}건)`
+                  : '대기 송장 없음'}
+            </button>
+            {previewError && (
+              <div style={{ color: '#fca5a5', fontSize: 12 }}>✗ {previewError}</div>
+            )}
+          </div>
         )}
 
-        {/* preview: 목록 확인 + 업로드 확정 */}
-        {uploadPhase === 'preview' && dailyStatus && (
+        {/* preview: 파일 확인 + 업로드 확정 */}
+        {uploadPhase === 'preview' && dailyStatus && previewFile && (
           <div>
             <div style={{
               padding: '10px 14px',
@@ -384,7 +427,31 @@ export default function InvoiceManager() {
             }}>
               {uploadedToday
                 ? `⚠ 오늘 이미 업로드했습니다. 추가 ${pending}건을 재업로드합니다.`
-                : `총 ${pending}건을 하나의 파일로 묶어 투에버에 업로드합니다.`}
+                : `총 ${previewFile.rowCount}건이 포함된 업로드 파일을 먼저 확인한 뒤 업로드하세요.`}
+            </div>
+
+            <div style={{
+              padding: '10px 14px',
+              background: 'rgba(34,197,94,0.08)',
+              border: '1px solid rgba(34,197,94,0.2)',
+              borderRadius: 8,
+              fontSize: 12,
+              color: '#86efac',
+              marginBottom: 12,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}>
+              <div>생성된 업로드 파일: <span style={{ fontFamily: 'monospace' }}>{previewFile.filePath.split(/[/\\]/).pop()}</span></div>
+              <div style={{ color: '#94a3b8', fontSize: 11, wordBreak: 'break-all' }}>{previewFile.filePath}</div>
+              <button
+                className="btn-secondary"
+                onClick={handleOpenPreviewFile}
+                disabled={running !== null}
+                style={{ alignSelf: 'flex-start', fontSize: 12 }}
+              >
+                📂 Excel 파일 열어서 확인
+              </button>
             </div>
 
             {/* 대기 송장 목록 */}
@@ -405,9 +472,9 @@ export default function InvoiceManager() {
                   </tr>
                 </thead>
                 <tbody>
-                  {dailyStatus.pendingItems.map((item, i) => (
+                  {previewFile.rows.map((item, i) => (
                     <tr
-                      key={item.order_no}
+                      key={`${item.order_no}|${item.invoice_no}`}
                       style={{
                         borderTop: '1px solid rgba(100,116,139,0.1)',
                         background: i % 2 === 0 ? 'transparent' : 'rgba(30,41,59,0.3)',
@@ -429,7 +496,7 @@ export default function InvoiceManager() {
                 disabled={running !== null}
                 style={{ background: '#a855f7' }}
               >
-                {running === 'upload' ? '업로드 중...' : `✅ 확인 — ${pending}건 지금 업로드`}
+                {running === 'upload' ? '업로드 중...' : `✅ 파일 확인 완료 — ${previewFile.rowCount}건 지금 업로드`}
               </button>
               <button
                 className="btn-secondary"
@@ -480,6 +547,7 @@ export default function InvoiceManager() {
         <h3 style={{ fontSize: 13, fontWeight: 600, color: '#fca5a5', marginBottom: 8 }}>주의 사항</h3>
         <ul style={{ color: '#94a3b8', fontSize: 12, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <li>송장 Import는 하루에 여러 번 해도 됩니다. 모두 누적됩니다.</li>
+          <li>Step 2에서 업로드 전 실제 Excel 파일을 생성해 내용을 먼저 확인할 수 있습니다.</li>
           <li>투에버 업로드는 하루에 한 번만 실행하세요. 모든 대기 송장이 하나의 파일로 묶여 올라갑니다.</li>
           <li>동일 송장파일은 중복 import되지 않습니다. (파일 hash 비교)</li>
           <li>한 주문에 여러 송장이 있으면 수동 처리가 필요합니다.</li>

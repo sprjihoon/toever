@@ -176,26 +176,17 @@ function createTables(db: Database.Database): void {
       finished_at   TEXT
     );
 
-    CREATE TABLE IF NOT EXISTS manual_shipment (
-      id               INTEGER PRIMARY KEY AUTOINCREMENT,
-      manual_date      TEXT NOT NULL,
-      receiver_name    TEXT NOT NULL,
-      receiver_phone   TEXT,
-      receiver_address TEXT,
-      product_name     TEXT NOT NULL,
-      option_name      TEXT,
-      quantity         INTEGER NOT NULL DEFAULT 1,
-      invoice_no       TEXT,
-      courier_name     TEXT,
-      reason           TEXT,
-      memo             TEXT,
-      toever_order_no  TEXT,
-      created_by       TEXT,
-      created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-      updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    CREATE TABLE IF NOT EXISTS app_holiday (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      date       TEXT NOT NULL,
+      name       TEXT NOT NULL,
+      source     TEXT NOT NULL DEFAULT 'COMPANY',
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
     );
 
-    CREATE INDEX IF NOT EXISTS idx_manual_shipment_date ON manual_shipment(manual_date);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_holiday_date_source ON app_holiday(date, source);
+    CREATE INDEX IF NOT EXISTS idx_holiday_date ON app_holiday(date);
+
   `)
 }
 

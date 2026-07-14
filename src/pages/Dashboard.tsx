@@ -274,6 +274,38 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
             >
               {running === 'collect' ? '수집 중...' : '주문 수집 실행'}
             </button>
+            <button
+              className="btn-secondary"
+              disabled={running !== null}
+              style={{ alignSelf: 'flex-start', fontSize: 12, color: '#f87171', borderColor: '#7f1d1d' }}
+              onClick={async () => {
+                const api = window.toeverApi
+                if (!api?.orders.clearToday) return
+                const targetDate = dateFrom
+                const ok = window.confirm(
+                  `${targetDate} 주문 데이터를 초기화합니다.\n\n` +
+                  `삭제 대상: 수집/신규/중복/변경감지/이지어드민업로드 상태\n` +
+                  `보존 대상: 송장 import 완료 이후 데이터 (중복 필터 유지)\n\n` +
+                  `계속하시겠습니까?`
+                )
+                if (!ok) return
+                setRunning('clear')
+                addLog(`${targetDate} 주문 데이터 초기화 중...`, 'info')
+                try {
+                  const r = await api.orders.clearToday(targetDate)
+                  if (r.success && r.data) {
+                    addLog(`초기화 완료: ${r.data.cleared}건 삭제, ${r.data.preserved}건 보존 (송장 데이터)`, 'success')
+                  } else {
+                    addLog(`초기화 실패: ${r.error ?? '알 수 없는 오류'}`, 'error')
+                  }
+                } finally {
+                  setRunning(null)
+                  loadStats()
+                }
+              }}
+            >
+              {running === 'clear' ? '초기화 중...' : '오늘 주문 초기화'}
+            </button>
           </div>
 
           {/* 이지어드민 업로드 파일 생성 */}
@@ -411,10 +443,9 @@ export default function Dashboard({ onNavigate, onReviewBadgeUpdate }: Props) {
           <h2 style={{ fontSize: 14, fontWeight: 600, color: '#f1f5f9', marginBottom: 12 }}>오늘 처리 현황</h2>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             {[
-              { label: '오전 수집', value: stats.morning_collected },
-              { label: '오후 수집', value: stats.afternoon_collected },
-              { label: '출고처리완료', value: stats.storeout_instructed },
-              { label: '오류', value: stats.errors, color: '#ef4444' },
+              ...stats.collect_by_round.map(r => ({ label: r.label, value: r.count, color: undefined as string | undefined })),
+              { label: '출고처리완료', value: stats.storeout_instructed, color: undefined as string | undefined },
+              { label: '오류', value: stats.errors, color: '#ef4444' as string | undefined },
             ].map(item => (
               <div key={item.label} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <div style={{

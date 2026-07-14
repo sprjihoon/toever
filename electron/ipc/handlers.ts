@@ -6,8 +6,10 @@ import {
   getOpenManualReviews, getManualReviews, updateManualReviewStatus,
   getActiveBatches, cancelEzadminBatch, getAllSettings, setSetting, getSetting,
   getBackupHistoryList, getReportData, getReportTemplates, saveReportTemplate, deleteReportTemplate, buildReport,
-  createManualShipment, updateManualShipment, deleteManualShipment, getManualShipmentList,
   createRun, updateRunStatus, getRecentArtifacts,
+  clearTodayOrderData,
+  getScheduleTimes, setScheduleTimes,
+  getHolidays, addCompanyHoliday, deleteHoliday,
 } from '../services/db/repositories'
 import { getDb } from '../services/db/schema'
 import { getKSTDateString } from '../services/storage'
@@ -15,24 +17,25 @@ import {
   collectOrders, generateEzadminUploadFile,
   importEzadminInvoice, uploadToeverInvoiceFile,
   previewToeverInvoiceUpload, getDailyInvoiceStatus,
+  generateToeverInvoiceUploadPreview,
   isLocked,
 } from '../services/toever/orchestrator'
-import { getOrdersForStoreout } from '../services/db/repositories'
-import { processStoreoutInstruction } from '../services/toever/browser'
 import {
   runBackup, getRunningAutomations, isBackupPathAvailable,
   getLastBackup,
 } from '../services/backup'
 import { restoreFromBackup, validateBackupFolder } from '../services/restore'
-import { savePassword, loadPassword, hasPasswordStored } from '../services/credential'
+import { savePassword, hasPasswordStored, canLoadPassword, getToeverCredentials } from '../services/credential'
 import { ensureAllDirs, isStorageAvailable, setBasePath, getBasePath } from '../services/storage'
 import { isChromiumInstalled, installChromium } from '../services/playwright/browserManager'
 import { restartScheduler } from '../services/scheduler'
+import { resetAllData } from '../services/reset'
+import { syncPublicHolidaysForYears } from '../services/holidaySync'
 import type {
   SearchOrdersParams, AppSettings,
   CollectOrdersParams, ImportInvoiceParams,
   IpcResult, ManualReviewStatus, ReportParams, ReportBuildParams,
-  ManualShipmentCreateParams, ManualShipmentSearchParams,
+  ScheduleTimeEntry,
 } from '../../shared/types'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
@@ -49,12 +52,15 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
           toever_id:              all['toever_id'] ?? '',
           toever_password:        '',
           has_stored_password:    hasPasswordStored(),
+          password_readable:      canLoadPassword(),
           storage_base_path:      all['storage_base_path'] ?? '',
           backup_path:            all['backup_path'] ?? '',
           scheduler_enabled:      all['scheduler_enabled'] === 'true',
-          morning_collect_time:   all['morning_collect_time'] ?? '10:30',
-          afternoon_collect_time: all['afternoon_collect_time'] ?? '15:30',
+          collect_schedule:       getScheduleTimes(),
+          // 미설정(최초 실행) 시 기본값 16:00 자동 활성화. 명시적으로 빈 문자열 저장하면 비활성화된 상태로 유지.
+          invoice_upload_time:    all['invoice_upload_time'] ?? '16:00',
           close_backup_time:      all['close_backup_time'] ?? '17:30',
+          public_data_api_key:    all['public_data_api_key'] ?? '',
         },
       }
     } catch (e) {
@@ -66,11 +72,15 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     try {
       for (const [key, value] of Object.entries(settings)) {
         if (key === 'toever_password') {
-          // ? ????? ?? ???? ?? (?? ?? ??)
+          // 빈 문자열이면 저장 건너뜀 (삭제 방지)
           if (String(value).trim() !== '') {
-            savePassword(String(value))
+            savePassword(String(value).trim())
           }
-        } else if (key !== 'has_stored_password') {
+        } else if (key === 'toever_id') {
+          setSetting(key, String(value).trim())
+        } else if (key === 'collect_schedule') {
+          setScheduleTimes(value as ScheduleTimeEntry[])
+        } else if (key !== 'has_stored_password' && key !== 'password_readable') {
           setSetting(key, String(value))
         }
       }
@@ -91,6 +101,32 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       try { restartScheduler() } catch { /* ???? ??? ?? ?? */ }
 
       return { success: true, data: { needsRestart } }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('settings:testLogin', async () => {
+    const creds = getToeverCredentials()
+    if (!creds.ok) {
+      return { success: false, error: creds.error }
+    }
+
+    const { launchBrowser, loginToever, closeBrowser } = require('../services/toever/browser')
+    const { DIRS } = require('../services/storage')
+
+    try {
+      const session = await launchBrowser(DIRS.logsScreenshots())
+      try {
+        const result = await loginToever(session.page, creds.id, creds.password)
+        return {
+          success: result.success,
+          error: result.error,
+          data: { sessionReused: result.sessionReused ?? false },
+        }
+      } finally {
+        await closeBrowser()
+      }
     } catch (e) {
       return { success: false, error: String(e) }
     }
@@ -137,10 +173,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
   ipcMain.handle('orders:collect', async (_e, params: CollectOrdersParams) => {
     try {
-      const settings = getAllSettings()
-      const password = loadPassword()
-      if (!settings['toever_id'] || !password) {
-        return { success: false, error: '투에버 ID/비밀번호가 설정되지 않았습니다.' }
+      const creds = getToeverCredentials()
+      if (!creds.ok) {
+        return { success: false, error: creds.error }
       }
       if (!isStorageAvailable()) {
         return { success: false, error: '저장소에 접근할 수 없습니다.' }
@@ -151,13 +186,23 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
       const result = await collectOrders({
         ...params,
-        toever_id: settings['toever_id'],
-        toever_password: password,
+        toever_id: creds.id,
+        toever_password: creds.password,
         emit: (event, data) => {
           mainWindow?.webContents.send('automation:event', { event, data })
         },
       })
       return { success: result.success, data: result }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('orders:clearToday', async (_e, orderDate?: string) => {
+    try {
+      const date = orderDate ?? getKSTDateString()
+      const result = clearTodayOrderData(date)
+      return { success: true, data: result }
     } catch (e) {
       return { success: false, error: String(e) }
     }
@@ -251,6 +296,16 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     }
   })
 
+  /** 실제 업로드 xls 파일 생성 (상태 변경 없음, 업로드 전 확인용) */
+  ipcMain.handle('invoice:generatePreviewFile', async () => {
+    try {
+      const preview = generateToeverInvoiceUploadPreview()
+      return { success: true, data: preview }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
   /**
    * ??? ?? ??? ??
    * - confirmed=true ?? ???? CONFIRM_REQUIRED ?? ?? (?? ? ?)
@@ -268,10 +323,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       }
     }
 
-    const settings = getAllSettings()
-    const password = loadPassword()
-    if (!settings['toever_id'] || !password) {
-      return { success: false, error: '투에버 ID/비밀번호가 설정되지 않았습니다.' }
+    const creds = getToeverCredentials()
+    if (!creds.ok) {
+      return { success: false, error: creds.error }
     }
     if (isLocked('upload_toever_invoice')) {
       return { success: false, error: '이미 실행 중입니다.' }
@@ -283,8 +337,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       `upload_invoice:${today}:${Date.now()}:${dryRun ? 'dry' : 'real'}`, 'manual')
     try {
       const result = await uploadToeverInvoiceFile({
-        toever_id:     settings['toever_id'],
-        toever_password: password,
+        toever_id:     creds.id,
+        toever_password: creds.password,
         run_id:        run.id,
         dryRun,
         emit: (event, data) => {
@@ -298,100 +352,6 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
           : result.errors.join('; ')
       updateRunStatus(run.id, result.success ? 'SUCCESS' : 'FAILED', summary)
       return { success: result.success, data: result }
-    } catch (e) {
-      updateRunStatus(run.id, 'FAILED', String(e))
-      return { success: false, error: String(e) }
-    }
-  })
-
-  // ============================================================
-  // ??????
-  // ============================================================
-
-  /** ?????? ?? ???? ?? ?? ?? (???? ??) */
-  ipcMain.handle('storeout:preview', async () => {
-    try {
-      const orders = getOrdersForStoreout()
-      return {
-        success: true,
-        data: orders.map(o => ({
-          order_no:   o.toever_order_no,
-          invoice_no: o.latest_invoice_no ?? '',
-          recipient:  o.receiver_name     ?? '',
-        })),
-      }
-    } catch (e) {
-      return { success: false, error: String(e) }
-    }
-  })
-
-  /**
-   * ?????? ??
-   * - confirmed=true ?? ???? CONFIRM_REQUIRED ??
-   * - dryRun=true(???): ???? ??/submit ?? ?? ??? ??
-   * - ?? ??? ? ?? ??? ?? ? ???? ? ?? (browser.ts ?? ??)
-   */
-  ipcMain.handle('storeout:execute', async (_e, params?: {
-    confirmed?: boolean
-    dryRun?: boolean
-  }) => {
-    if (!params?.confirmed) {
-      return {
-        success: false,
-        error: 'CONFIRM_REQUIRED',
-        message: '출고지시를 확인해주세요. confirmed:true 를 전달하세요.',
-      }
-    }
-
-    const settings = getAllSettings()
-    const password = loadPassword()
-    if (!settings['toever_id'] || !password) {
-      return { success: false, error: '투에버 ID/비밀번호가 설정되지 않았습니다.' }
-    }
-    if (isLocked('storeout_instruct')) {
-      return { success: false, error: '이미 실행 중입니다.' }
-    }
-
-    const dryRun = params?.dryRun ?? false
-    const orders = getOrdersForStoreout()
-    if (orders.length === 0) {
-      return { success: false, error: '출고지시 대상 주문이 없습니다.' }
-    }
-
-    const poNos  = orders.map(o => o.toever_order_no)
-    const today  = getKSTDateString()
-    const run    = createRun('STOREOUT_INSTRUCT', today,
-      `storeout:${today}:${Date.now()}:${dryRun ? 'dry' : 'real'}`, 'manual')
-
-    const { launchBrowser, loginToever, closeBrowser, processStoreoutInstruction: storeout } =
-      require('../services/toever/browser')
-
-    try {
-      const session = await launchBrowser(require('../services/storage').DIRS.generatedToeverInvoiceUpload())
-      const { page } = session
-      try {
-        const loginResult = await loginToever(page, settings['toever_id'], password, run.id)
-        if (!loginResult.success) {
-          updateRunStatus(run.id, 'FAILED', loginResult.error)
-          return { success: false, error: loginResult.error }
-        }
-
-        mainWindow?.webContents.send('automation:event', {
-          event: 'progress',
-          data: { step: dryRun ? '[DRY-RUN] 출고지시 실행 중...' : '출고지시 실행 중...' },
-        })
-
-        const result = await processStoreoutInstruction(page, poNos, run.id, dryRun)
-        const summary = result.dryRun
-          ? `DRY-RUN: ${result.processedPoNos.length}건 처리 완료`
-          : result.success
-            ? `${result.processedPoNos.length}건 처리`
-            : `실패/불명: ${[...result.failedPoNos, ...result.unclearPoNos].join(', ')}`
-        updateRunStatus(run.id, result.success ? 'SUCCESS' : 'PARTIAL', summary)
-        return { success: result.success, data: result }
-      } finally {
-        await closeBrowser()
-      }
     } catch (e) {
       updateRunStatus(run.id, 'FAILED', String(e))
       return { success: false, error: String(e) }
@@ -597,7 +557,12 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     }
   })
 
-  // ? ???
+  // 앱 버전 조회
+  ipcMain.handle('app:getVersion', () => {
+    return { success: true, data: app.getVersion() }
+  })
+
+  // 앱 재시작
   ipcMain.handle('app:relaunch', async () => {
     app.relaunch()
     app.quit()
@@ -684,39 +649,74 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ============================================================
-  // ??? (Manual Shipment)
+  // 휴일 (스케줄러 자동수집/업로드/백업 스킵)
   // ============================================================
 
-  ipcMain.handle('manual:create', async (_e, params: ManualShipmentCreateParams) => {
+  ipcMain.handle('holiday:getList', async (_e, date_from?: string, date_to?: string) => {
     try {
-      const item = createManualShipment(params)
+      return { success: true, data: getHolidays(date_from, date_to) }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('holiday:addCompany', async (_e, date: string, name: string) => {
+    try {
+      const item = addCompanyHoliday(date, name)
       return { success: true, data: item }
     } catch (e) {
       return { success: false, error: String(e) }
     }
   })
 
-  ipcMain.handle('manual:update', async (_e, id: number, params: Partial<ManualShipmentCreateParams>) => {
+  ipcMain.handle('holiday:delete', async (_e, id: number) => {
     try {
-      updateManualShipment(id, params)
+      deleteHoliday(id)
       return { success: true }
     } catch (e) {
       return { success: false, error: String(e) }
     }
   })
 
-  ipcMain.handle('manual:delete', async (_e, id: number) => {
+  /** 공공데이터포털 API로 지정 연도들의 공휴일 동기화 (인증키 미설정 시 오류 반환) */
+  ipcMain.handle('holiday:syncFromApi', async (_e, years: number[]) => {
     try {
-      deleteManualShipment(id)
-      return { success: true }
+      const apiKey = getSetting('public_data_api_key') ?? ''
+      if (!apiKey.trim()) {
+        return { success: false, error: '설정에서 공공데이터포털 API 인증키를 먼저 입력해주세요.' }
+      }
+      const results = await syncPublicHolidaysForYears(apiKey, years)
+      const failed = results.filter(r => !r.success)
+      return { success: failed.length === 0, data: results, error: failed[0]?.error }
     } catch (e) {
       return { success: false, error: String(e) }
     }
   })
 
-  ipcMain.handle('manual:getList', async (_e, params: ManualShipmentSearchParams) => {
+  // ============================================================
+  // 전체 데이터 초기화
+  // ============================================================
+
+  /**
+   * 전체 데이터 초기화 — DB 전체 초기화 + 생성/업로드/원본 파일 전체 삭제
+   * - 실행 중인 자동화 작업이 있으면 차단
+   * - confirmed=true 없으면 CONFIRM_REQUIRED 반환 (실수 방지)
+   * - 되돌릴 수 없음 (앱 재시작 필요)
+   */
+  ipcMain.handle('system:resetAll', async (_e, params?: { confirmed?: boolean }) => {
+    if (!params?.confirmed) {
+      return {
+        success: false,
+        error: 'CONFIRM_REQUIRED',
+        message: '전체 초기화를 확인해주세요. confirmed:true 를 전달하세요.',
+      }
+    }
+    const running = getRunningAutomations()
+    if (running.length > 0) {
+      return { success: false, error: `실행 중인 작업이 있어 초기화할 수 없습니다: ${running.map(r => r.label).join(', ')}` }
+    }
     try {
-      const result = getManualShipmentList(params)
+      const result = resetAllData()
       return { success: true, data: result }
     } catch (e) {
       return { success: false, error: String(e) }

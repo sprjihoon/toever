@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import type { DragEvent } from 'react'
 import type { ReportPeriod, ReportWidgetConfig, ReportTemplate, WidgetResult, WidgetType, WidgetSize } from '../../shared/types'
 
 // ============================================================
@@ -261,6 +262,224 @@ function WidgetRenderer({ w, result }: { w: ReportWidgetConfig; result: WidgetRe
 }
 
 // ============================================================
+// 지표 선택 모달 (체크박스 다중 선택)
+// ============================================================
+function WidgetPickerModal({
+  open,
+  initialWidgets,
+  onApply,
+  onClose,
+}: {
+  open: boolean
+  initialWidgets: ReportWidgetConfig[]
+  onApply: (widgets: ReportWidgetConfig[]) => void
+  onClose: () => void
+}) {
+  const [checked, setChecked] = useState<Set<WidgetType>>(new Set())
+
+  useEffect(() => {
+    if (open) setChecked(new Set(initialWidgets.map(w => w.type)))
+  }, [open, initialWidgets])
+
+  if (!open) return null
+
+  const toggle = (type: WidgetType) => {
+    setChecked(prev => {
+      const next = new Set(prev)
+      if (next.has(type)) next.delete(type)
+      else next.add(type)
+      return next
+    })
+  }
+
+  const toggleCategory = (cat: string, selectAll: boolean) => {
+    setChecked(prev => {
+      const next = new Set(prev)
+      for (const item of CATALOG.filter(c => c.category === cat)) {
+        if (selectAll) next.add(item.type)
+        else next.delete(item.type)
+      }
+      return next
+    })
+  }
+
+  const handleApply = () => {
+    // 기존 위젯은 순서를 유지하고, 새로 체크된 항목만 뒤에 추가한다.
+    const kept = initialWidgets.filter(w => checked.has(w.type))
+    const keptTypes = new Set(kept.map(w => w.type))
+    const added: ReportWidgetConfig[] = []
+    checked.forEach(type => {
+      if (!keptTypes.has(type)) {
+        const ci = CATALOG.find(c => c.type === type)!
+        added.push({ id: uid(), type, label: ci.label, size: ci.defaultSize })
+      }
+    })
+    onApply([...kept, ...added])
+    onClose()
+  }
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ width: 640, maxHeight: '82vh', display: 'flex', flexDirection: 'column', background: C.sidebar, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}
+      >
+        <div style={{ padding: '16px 20px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>지표 선택</div>
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>보고서에 표시할 지표를 체크하세요 · {checked.size}개 선택됨</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: C.muted, fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>×</button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+          {CATEGORIES.map(cat => {
+            const items = CATALOG.filter(c => c.category === cat)
+            const allChecked = items.every(i => checked.has(i.type))
+            return (
+              <div key={cat} style={{ marginBottom: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span style={{ fontSize: 11, color: C.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>{cat}</span>
+                  <button onClick={() => toggleCategory(cat, !allChecked)} style={{ fontSize: 11, color: C.blue, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}>
+                    {allChecked ? '전체 해제' : '전체 선택'}
+                  </button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+                  {items.map(c => {
+                    const isChecked = checked.has(c.type)
+                    return (
+                      <label key={c.type} style={{
+                        display: 'flex', alignItems: 'flex-start', gap: 8, padding: '9px 10px', cursor: 'pointer',
+                        background: isChecked ? 'rgba(59,130,246,0.14)' : C.card,
+                        border: `1px solid ${isChecked ? C.blue : C.border}`, borderRadius: 7,
+                      }}>
+                        <input type="checkbox" checked={isChecked} onChange={() => toggle(c.type)} style={{ marginTop: 3, cursor: 'pointer' }} />
+                        <div>
+                          <div style={{ fontSize: 12, color: C.text, fontWeight: 600 }}>{c.icon} {c.label}</div>
+                          <div style={{ fontSize: 10, color: C.muted, marginTop: 2, lineHeight: 1.4 }}>{c.desc}</div>
+                        </div>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div style={{ padding: '14px 20px', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'flex-end', gap: 8, flexShrink: 0 }}>
+          <button onClick={onClose} style={{ padding: '8px 16px', background: 'transparent', border: `1px solid ${C.border}`, color: C.muted, borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+            취소
+          </button>
+          <button onClick={handleApply} style={{ padding: '8px 22px', background: C.blue, color: 'white', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+            적용 ({checked.size}개)
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// 위젯 한 줄 (드래그로 순서 변경, 클릭으로 이름 변경)
+// ============================================================
+function WidgetRow({
+  w,
+  dragging,
+  dragOver,
+  onDragStart,
+  onDragOver,
+  onDragEnd,
+  onDrop,
+  onLabelChange,
+  onSizeChange,
+  onTopNChange,
+  onRemove,
+}: {
+  w: ReportWidgetConfig
+  dragging: boolean
+  dragOver: boolean
+  onDragStart: () => void
+  onDragOver: (e: DragEvent) => void
+  onDragEnd: () => void
+  onDrop: () => void
+  onLabelChange: (label: string) => void
+  onSizeChange: (size: WidgetSize) => void
+  onTopNChange: (n: number) => void
+  onRemove: () => void
+}) {
+  const ci = CATALOG.find(c => c.type === w.type)!
+  const [editing, setEditing] = useState(false)
+
+  return (
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragEnd={onDragEnd}
+      onDrop={onDrop}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8, background: C.card,
+        border: `1px solid ${dragOver ? C.blue : C.border}`, borderRadius: 6, padding: '8px 10px',
+        opacity: dragging ? 0.35 : 1,
+      }}
+    >
+      <span style={{ cursor: 'grab', color: C.muted, fontSize: 13, userSelect: 'none', flexShrink: 0 }} title="드래그하여 순서 변경">⠿⠿</span>
+      <span style={{ fontSize: 15, flexShrink: 0 }}>{ci.icon}</span>
+      {editing ? (
+        <input
+          autoFocus
+          value={w.label}
+          onChange={e => onLabelChange(e.target.value)}
+          onBlur={() => setEditing(false)}
+          onKeyDown={e => { if (e.key === 'Enter') setEditing(false) }}
+          style={{ flex: 1, minWidth: 0, background: '#0f172a', border: `1px solid ${C.blue}`, color: C.text, fontSize: 13, borderRadius: 4, padding: '3px 6px' }}
+        />
+      ) : (
+        <span
+          onClick={() => setEditing(true)}
+          title="클릭하여 이름 변경"
+          style={{ flex: 1, minWidth: 0, fontSize: 13, color: C.text, fontWeight: 500, cursor: 'text', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        >
+          {w.label}
+        </span>
+      )}
+      {w.type === 'top_products' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+          <span style={{ fontSize: 10, color: C.muted }}>TOP</span>
+          <input
+            type="number" min={1} max={50} value={w.config?.top_n ?? 10}
+            onChange={e => onTopNChange(Number(e.target.value))}
+            style={{ width: 40, background: '#0f172a', border: `1px solid ${C.border}`, color: C.text, borderRadius: 3, padding: '2px 4px', fontSize: 11, textAlign: 'center' }}
+          />
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+        {SIZE_OPTIONS.map(o => (
+          <button
+            key={o.value}
+            onClick={() => onSizeChange(o.value)}
+            title={o.label}
+            style={{
+              width: 22, height: 22, fontSize: 10, borderRadius: 4, cursor: 'pointer',
+              background: w.size === o.value ? C.blue : 'transparent',
+              color: w.size === o.value ? 'white' : C.muted,
+              border: `1px solid ${w.size === o.value ? C.blue : C.border}`,
+            }}
+          >
+            {o.label[0]}
+          </button>
+        ))}
+      </div>
+      <button onClick={onRemove} title="제거" style={{ padding: '2px 6px', fontSize: 14, background: 'transparent', border: 'none', color: C.muted, cursor: 'pointer', flexShrink: 0 }}>×</button>
+    </div>
+  )
+}
+
+// ============================================================
 // 메인 컴포넌트
 // ============================================================
 export default function Reports() {
@@ -275,10 +494,12 @@ export default function Reports() {
   const [dateFrom, setDateFrom] = useState(firstOfMonth())
   const [dateTo, setDateTo]   = useState(todayKST())
 
-  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [pickerOpen, setPickerOpen]   = useState(false)
   const [running, setRunning]         = useState(false)
   const [results, setResults]         = useState<WidgetResult[] | null>(null)
   const [saveMsg, setSaveMsg]         = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const [dragIdx, setDragIdx]         = useState<number | null>(null)
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
 
   // 템플릿 목록 로드
   const loadTemplates = useCallback(async () => {
@@ -290,14 +511,30 @@ export default function Reports() {
 
   useEffect(() => { loadTemplates() }, [loadTemplates])
 
-  // 템플릿 선택
+  // 보고서 조회 (명시적 인자를 받아 상태 업데이트 타이밍 문제 없이 즉시 실행 가능)
+  const runReportWith = useCallback(async (widgets: ReportWidgetConfig[], p: ReportPeriod, from: string, to: string) => {
+    if (!widgets.length) { setResults(null); return }
+    const api = window.toeverApi
+    if (!api) return
+    setRunning(true)
+    try {
+      const res = await api.report.buildReport({ period: p, date_from: from, date_to: to, widgets })
+      if (res.success) setResults(res.data as WidgetResult[])
+    } finally {
+      setRunning(false)
+    }
+  }, [])
+
+  // 템플릿 선택 — 선택 즉시 자동으로 조회하여 "조회" 클릭을 한 번 줄여준다.
   const selectTemplate = (t: ReportTemplate) => {
     setActiveId(t.id)
     setDraftName(t.name)
     setDraftDesc(t.description ?? '')
-    setDraftWidgets(t.widgets.map(w => ({ ...w })))
+    const widgets = t.widgets.map(w => ({ ...w }))
+    setDraftWidgets(widgets)
     setIsModified(false)
     setResults(null)
+    runReportWith(widgets, period, dateFrom, dateTo)
   }
 
   // 새 보고서
@@ -339,10 +576,9 @@ export default function Reports() {
     await loadTemplates()
   }
 
-  // 위젯 추가
-  const addWidget = (type: WidgetType) => {
-    const ci = CATALOG.find(c => c.type === type)!
-    setDraftWidgets(prev => [...prev, { id: uid(), type, label: ci.label, size: ci.defaultSize }])
+  // 지표 선택 모달에서 적용
+  const applyWidgetSelection = (widgets: ReportWidgetConfig[]) => {
+    setDraftWidgets(widgets)
     setIsModified(true)
     setResults(null)
   }
@@ -354,42 +590,28 @@ export default function Reports() {
     setResults(null)
   }
 
-  // 위젯 이동
-  const moveWidget = (id: string, dir: -1 | 1) => {
-    setDraftWidgets(prev => {
-      const idx = prev.findIndex(w => w.id === id)
-      if (idx < 0) return prev
-      const next = idx + dir
-      if (next < 0 || next >= prev.length) return prev
-      const arr = [...prev]
-      ;[arr[idx], arr[next]] = [arr[next], arr[idx]]
-      return arr
-    })
-    setIsModified(true)
-    setResults(null)
-  }
-
-  // 위젯 속성 변경
+  // 위젯 속성 변경 (이름/크기/top_n)
   const patchWidget = (id: string, patch: Partial<ReportWidgetConfig>) => {
     setDraftWidgets(prev => prev.map(w => w.id === id ? { ...w, ...patch } : w))
     setIsModified(true)
     setResults(null)
   }
 
-  // 보고서 조회
-  const runReport = async () => {
-    if (!draftWidgets.length) return
-    const api = window.toeverApi
-    if (!api) return
-    setRunning(true)
+  // 드래그로 순서 변경
+  const reorderWidget = (from: number, to: number) => {
+    if (from === to) return
+    setDraftWidgets(prev => {
+      const arr = [...prev]
+      const [item] = arr.splice(from, 1)
+      arr.splice(to, 0, item)
+      return arr
+    })
+    setIsModified(true)
     setResults(null)
-    try {
-      const res = await api.report.buildReport({ period, date_from: dateFrom, date_to: dateTo, widgets: draftWidgets })
-      if (res.success) setResults(res.data as WidgetResult[])
-    } finally {
-      setRunning(false)
-    }
   }
+
+  // 보고서 조회
+  const runReport = () => runReportWith(draftWidgets, period, dateFrom, dateTo)
 
   // 빠른 기간 설정
   const setPreset = (preset: string) => {
@@ -455,124 +677,93 @@ export default function Reports() {
       {/* ── 오른쪽 메인 영역 ── */}
       <div style={{ flex: 1, overflow: 'auto', background: C.bg, display: 'flex', flexDirection: 'column' }}>
 
-        {/* 상단 툴바 */}
-        <div style={{ padding: '12px 20px', borderBottom: `1px solid ${C.border}`, background: C.sidebar, display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-          <input
-            value={draftName}
-            onChange={e => { setDraftName(e.target.value); setIsModified(true) }}
-            style={{ flex: 1, maxWidth: 280, background: '#0f172a', border: `1px solid ${C.border}`, color: C.text, borderRadius: 5, padding: '6px 10px', fontSize: 14, fontWeight: 600 }}
-            placeholder="보고서 이름"
-          />
-          {isModified && <span style={{ fontSize: 11, color: C.yellow }}>● 미저장</span>}
-          {saveMsg && <span style={{ fontSize: 11, color: saveMsg.type === 'ok' ? C.green : C.red }}>{saveMsg.text}</span>}
-          <button onClick={saveTemplate} style={{ padding: '6px 16px', background: C.blue, color: 'white', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>저장</button>
-          {activeId && <button onClick={deleteTemplate} style={{ padding: '6px 14px', background: 'transparent', color: C.red, border: `1px solid ${C.red}`, borderRadius: 5, fontSize: 12, cursor: 'pointer' }}>삭제</button>}
+        {/* 상단 툴바 — 1행: 보고서 이름/저장, 2행: 기간·조회 */}
+        <div style={{ borderBottom: `1px solid ${C.border}`, background: C.sidebar, flexShrink: 0 }}>
+          <div style={{ padding: '12px 20px 8px', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input
+              value={draftName}
+              onChange={e => { setDraftName(e.target.value); setIsModified(true) }}
+              style={{ flex: 1, maxWidth: 280, background: '#0f172a', border: `1px solid ${C.border}`, color: C.text, borderRadius: 5, padding: '6px 10px', fontSize: 14, fontWeight: 600 }}
+              placeholder="보고서 이름"
+            />
+            {isModified && <span style={{ fontSize: 11, color: C.yellow }}>● 미저장</span>}
+            {saveMsg && <span style={{ fontSize: 11, color: saveMsg.type === 'ok' ? C.green : C.red }}>{saveMsg.text}</span>}
+            <button onClick={saveTemplate} style={{ padding: '6px 16px', background: C.blue, color: 'white', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>저장</button>
+            {activeId && <button onClick={deleteTemplate} style={{ padding: '6px 14px', background: 'transparent', color: C.red, border: `1px solid ${C.red}`, borderRadius: 5, fontSize: 12, cursor: 'pointer' }}>삭제</button>}
+          </div>
 
-          <div style={{ flex: 1 }} />
-
-          {/* 기간 제어 */}
-          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ padding: '8px 20px 12px', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             {[{ k: 'today', l: '오늘' }, { k: 'week', l: '이번주' }, { k: 'month', l: '이번달' }, { k: 'last_month', l: '지난달' }, { k: 'quarter', l: '분기' }, { k: 'half', l: '반기' }, { k: 'year', l: '올해' }].map(p => (
-              <button key={p.k} onClick={() => setPreset(p.k)} style={{ padding: '4px 8px', fontSize: 11, background: C.border, color: C.muted, border: 'none', borderRadius: 4, cursor: 'pointer' }}>{p.l}</button>
+              <button key={p.k} onClick={() => setPreset(p.k)} style={{ padding: '5px 10px', fontSize: 11, background: C.border, color: C.muted, border: 'none', borderRadius: 4, cursor: 'pointer' }}>{p.l}</button>
             ))}
+            <span style={{ width: 1, height: 18, background: C.border, margin: '0 2px' }} />
             <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setResults(null) }}
-              style={{ background: '#0f172a', border: `1px solid ${C.border}`, color: C.text, borderRadius: 4, padding: '4px 6px', fontSize: 12 }} />
+              style={{ background: '#0f172a', border: `1px solid ${C.border}`, color: C.text, borderRadius: 4, padding: '5px 6px', fontSize: 12 }} />
             <span style={{ color: C.muted, fontSize: 12 }}>~</span>
             <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setResults(null) }}
-              style={{ background: '#0f172a', border: `1px solid ${C.border}`, color: C.text, borderRadius: 4, padding: '4px 6px', fontSize: 12 }} />
+              style={{ background: '#0f172a', border: `1px solid ${C.border}`, color: C.text, borderRadius: 4, padding: '5px 6px', fontSize: 12 }} />
             <select value={period} onChange={e => { setPeriod(e.target.value as ReportPeriod); setResults(null) }}
-              style={{ background: '#0f172a', border: `1px solid ${C.border}`, color: C.text, borderRadius: 4, padding: '4px 6px', fontSize: 12 }}>
+              style={{ background: '#0f172a', border: `1px solid ${C.border}`, color: C.text, borderRadius: 4, padding: '5px 6px', fontSize: 12 }}>
               {PERIOD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
+            <div style={{ flex: 1 }} />
             <button onClick={runReport} disabled={running || !draftWidgets.length}
-              style={{ padding: '5px 18px', background: running || !draftWidgets.length ? C.border : C.green, color: 'white', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 700, cursor: running || !draftWidgets.length ? 'default' : 'pointer' }}>
-              {running ? '조회중...' : '조회'}
+              style={{ padding: '7px 24px', background: running || !draftWidgets.length ? C.border : C.green, color: 'white', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: running || !draftWidgets.length ? 'default' : 'pointer' }}>
+              {running ? '조회중...' : '▶ 조회'}
             </button>
           </div>
         </div>
 
         {/* 위젯 구성 영역 */}
         <div style={{ padding: '16px 20px', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <span style={{ fontSize: 11, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>위젯 구성 ({draftWidgets.length}개)</span>
-            <button onClick={() => setPaletteOpen(v => !v)} style={{
-              padding: '4px 12px', fontSize: 11, background: paletteOpen ? C.blue : C.border,
-              color: paletteOpen ? 'white' : C.muted, border: 'none', borderRadius: 4, cursor: 'pointer',
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <span style={{ fontSize: 11, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>지표 구성 ({draftWidgets.length}개)</span>
+            <button onClick={() => setPickerOpen(true)} style={{
+              padding: '5px 14px', fontSize: 12, fontWeight: 600, background: C.blue, color: 'white', border: 'none', borderRadius: 5, cursor: 'pointer',
             }}>
-              {paletteOpen ? '▲ 위젯 팔레트 닫기' : '▼ + 위젯 추가'}
+              + 지표 선택
             </button>
           </div>
 
-          {/* 위젯 팔레트 */}
-          {paletteOpen && (
-            <div style={{ background: '#0a1628', border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginBottom: 14 }}>
-              {CATEGORIES.map(cat => (
-                <div key={cat} style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 10, color: C.muted, fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>{cat}</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {CATALOG.filter(c => c.category === cat).map(c => (
-                      <button key={c.type} onClick={() => addWidget(c.type)} style={{
-                        padding: '5px 10px', fontSize: 11, background: C.card, color: C.text,
-                        border: `1px solid ${C.border}`, borderRadius: 5, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
-                      }}>
-                        <span>{c.icon}</span> {c.label} <span style={{ color: C.blue, fontSize: 13 }}>+</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+          {/* 위젯 목록 (드래그로 순서 변경) */}
+          {draftWidgets.length === 0 ? (
+            <button
+              onClick={() => setPickerOpen(true)}
+              style={{
+                width: '100%', color: C.muted, fontSize: 13, textAlign: 'center', padding: '22px 0',
+                background: '#0a1628', border: `1px dashed ${C.border}`, borderRadius: 8, cursor: 'pointer',
+              }}
+            >
+              지표를 선택해 보고서를 구성하세요
+            </button>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {draftWidgets.map((w, idx) => (
+                <WidgetRow
+                  key={w.id}
+                  w={w}
+                  dragging={dragIdx === idx}
+                  dragOver={dragOverIdx === idx && dragIdx !== idx}
+                  onDragStart={() => setDragIdx(idx)}
+                  onDragOver={e => { e.preventDefault(); setDragOverIdx(idx) }}
+                  onDragEnd={() => { setDragIdx(null); setDragOverIdx(null) }}
+                  onDrop={() => { if (dragIdx !== null) reorderWidget(dragIdx, idx); setDragIdx(null); setDragOverIdx(null) }}
+                  onLabelChange={label => patchWidget(w.id, { label })}
+                  onSizeChange={size => patchWidget(w.id, { size })}
+                  onTopNChange={n => patchWidget(w.id, { config: { ...w.config, top_n: n } })}
+                  onRemove={() => removeWidget(w.id)}
+                />
               ))}
             </div>
           )}
-
-          {/* 위젯 캔버스 (편집) */}
-          {draftWidgets.length === 0 ? (
-            <div style={{ color: C.muted, fontSize: 13, textAlign: 'center', padding: '18px 0' }}>
-              위젯을 추가해 보고서를 구성하세요
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {draftWidgets.map((w, idx) => {
-                const ci = CATALOG.find(c => c.type === w.type)!
-                return (
-                  <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 12px' }}>
-                    <span style={{ fontSize: 16 }}>{ci.icon}</span>
-                    {/* 라벨 편집 */}
-                    <input
-                      value={w.label}
-                      onChange={e => patchWidget(w.id, { label: e.target.value })}
-                      style={{ flex: 1, background: 'transparent', border: 'none', color: C.text, fontSize: 13, fontWeight: 500, outline: 'none' }}
-                    />
-                    <span style={{ fontSize: 10, color: C.muted }}>{ci.category}</span>
-                    {/* top_n 설정 */}
-                    {w.type === 'top_products' && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span style={{ fontSize: 11, color: C.muted }}>TOP</span>
-                        <input
-                          type="number" min={1} max={50} value={w.config?.top_n ?? 10}
-                          onChange={e => patchWidget(w.id, { config: { ...w.config, top_n: Number(e.target.value) } })}
-                          style={{ width: 44, background: '#0f172a', border: `1px solid ${C.border}`, color: C.text, borderRadius: 3, padding: '2px 4px', fontSize: 11, textAlign: 'center' }}
-                        />
-                      </div>
-                    )}
-                    {/* 크기 선택 */}
-                    <select value={w.size} onChange={e => patchWidget(w.id, { size: e.target.value as WidgetSize })}
-                      style={{ background: '#0f172a', border: `1px solid ${C.border}`, color: C.muted, borderRadius: 4, padding: '2px 4px', fontSize: 11 }}>
-                      {SIZE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                    {/* 순서 이동 */}
-                    <button onClick={() => moveWidget(w.id, -1)} disabled={idx === 0}
-                      style={{ padding: '2px 6px', fontSize: 11, background: 'transparent', border: `1px solid ${C.border}`, color: C.muted, borderRadius: 3, cursor: idx === 0 ? 'default' : 'pointer', opacity: idx === 0 ? 0.3 : 1 }}>↑</button>
-                    <button onClick={() => moveWidget(w.id, 1)} disabled={idx === draftWidgets.length - 1}
-                      style={{ padding: '2px 6px', fontSize: 11, background: 'transparent', border: `1px solid ${C.border}`, color: C.muted, borderRadius: 3, cursor: idx === draftWidgets.length - 1 ? 'default' : 'pointer', opacity: idx === draftWidgets.length - 1 ? 0.3 : 1 }}>↓</button>
-                    {/* 삭제 */}
-                    <button onClick={() => removeWidget(w.id)}
-                      style={{ padding: '2px 7px', fontSize: 13, background: 'transparent', border: `1px solid ${C.border}`, color: C.red, borderRadius: 3, cursor: 'pointer' }}>×</button>
-                  </div>
-                )
-              })}
-            </div>
-          )}
         </div>
+
+        <WidgetPickerModal
+          open={pickerOpen}
+          initialWidgets={draftWidgets}
+          onApply={applyWidgetSelection}
+          onClose={() => setPickerOpen(false)}
+        />
 
         {/* 보고서 결과 */}
         {results && (
@@ -602,12 +793,21 @@ export default function Reports() {
           </div>
         )}
 
-        {/* 위젯 없음 안내 */}
+        {/* 지표 없음 안내 */}
         {!results && draftWidgets.length === 0 && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: C.muted }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>📈</div>
             <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>보고서를 구성해보세요</div>
-            <div style={{ fontSize: 13 }}>위의 <strong style={{ color: C.blue }}>+ 위젯 추가</strong>를 눌러 지표를 선택하고 저장·조회하세요</div>
+            <div style={{ fontSize: 13, marginBottom: 16 }}>원하는 지표를 체크해서 선택하면 바로 보고서가 만들어집니다</div>
+            <button onClick={() => setPickerOpen(true)} style={{ padding: '9px 22px', background: C.blue, color: 'white', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+              + 지표 선택하기
+            </button>
+          </div>
+        )}
+        {/* 지표는 있지만 아직 조회하지 않은 경우 */}
+        {!results && draftWidgets.length > 0 && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: C.muted }}>
+            <div style={{ fontSize: 13 }}>기간을 확인하고 <strong style={{ color: C.green }}>▶ 조회</strong>를 눌러 결과를 확인하세요</div>
           </div>
         )}
       </div>

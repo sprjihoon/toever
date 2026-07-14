@@ -19,7 +19,19 @@ export type OrderStatus =
   | 'ON_HOLD'
   | 'RETURN_REQUESTED'
 
-export type CollectRound = 'morning' | 'afternoon' | 'manual'
+/**
+ * 수집 회차 식별자.
+ * 'manual' 은 수동 실행(중복 idempotency 없음) 전용 예약어이며,
+ * 그 외 값은 스케줄러에 등록된 각 시간대(ScheduleTimeEntry.id)를 가리키는 자유 문자열이다.
+ */
+export type CollectRound = string
+
+/** 스케줄러에 등록된 자동 주문수집 시간대 (사용자가 추가/삭제/수정 가능) */
+export interface ScheduleTimeEntry {
+  id: string     // 안정적 식별자 (lock/idempotency key, DB collect_round 저장값)
+  time: string   // 'HH:MM'
+  label: string  // 화면에 표시할 이름 (예: "오전 수집", "1차 수집")
+}
 
 export type RunStatus = 'RUNNING' | 'SUCCESS' | 'FAILED' | 'PARTIAL'
 
@@ -28,7 +40,6 @@ export type RunType =
   | 'EXPORT_EZADMIN'
   | 'IMPORT_INVOICE'
   | 'UPLOAD_TOEVER_INVOICE'
-  | 'STOREOUT_INSTRUCT'
   | 'BACKUP'
   | 'REPORT'
 
@@ -41,7 +52,6 @@ export type ManualReviewType =
   | 'HEADER_MISMATCH'
   | 'UPLOAD_PARTIAL_FAIL'
   | 'TOKEN_MISSING'
-  | 'STOREOUT_UNCLEAR'
   | 'SCIENTIFIC_NOTATION'
   | 'UNKNOWN'
 
@@ -93,6 +103,15 @@ export interface OrderHeader {
   ezadmin_batch_id: number | null
   source_run_id: number | null
   hash_snapshot: string
+}
+
+/** 투에버 송장 업로드 파일 1행 (같은 주문번호에 복수 송장 가능) */
+export interface ToeverInvoiceUploadRow {
+  order_id: number
+  toever_order_no: string
+  invoice_no: string
+  receiver_name: string
+  status: OrderStatus
 }
 
 export interface OrderItem {
@@ -265,8 +284,7 @@ export interface IpcResult<T = unknown> {
 export interface DashboardStats {
   today: string
   total_collected: number
-  morning_collected: number
-  afternoon_collected: number
+  collect_by_round: { round: string; label: string; count: number }[]
   new_shipment_targets: number
   duplicate_skipped: number
   order_changed_review: number
@@ -393,8 +411,6 @@ export interface ReportTrendRow {
   orders: number
   shipped: number
   quantity: number
-  manual_count: number
-  manual_quantity: number
 }
 
 export interface ReportTopProduct {
@@ -420,17 +436,6 @@ export interface ReportStatusRow {
   count: number
 }
 
-export interface ReportManualSummary {
-  total_manual: number
-  total_manual_quantity: number
-}
-
-export interface ReportManualRow {
-  period_label: string
-  count: number
-  quantity: number
-}
-
 export interface ReportData {
   summary: {
     total_orders: number
@@ -438,65 +443,25 @@ export interface ReportData {
     total_quantity: number
     distinct_products: number
   }
-  manual_summary: ReportManualSummary
   trend: ReportTrendRow[]
   top_products: ReportTopProduct[]
   by_region: ReportRegionRow[]
   by_courier: ReportCourierRow[]
   by_status: ReportStatusRow[]
-  manual_by_period: ReportManualRow[]
 }
 
 // ============================================================
-// 수기건 (Manual Shipment)
+// 휴일 (스케줄러 자동수집/백업 스킵용)
 // ============================================================
 
-export interface ManualShipment {
+export type HolidaySource = 'PUBLIC_SEED' | 'PUBLIC_API' | 'COMPANY'
+
+export interface AppHoliday {
   id: number
-  manual_date: string            // 처리일자 YYYY-MM-DD
-  receiver_name: string          // 수령자명
-  receiver_phone: string | null  // 연락처
-  receiver_address: string | null // 주소
-  product_name: string           // 상품명
-  option_name: string | null     // 옵션
-  quantity: number               // 수량
-  invoice_no: string | null      // 송장번호
-  courier_name: string | null    // 택배사
-  reason: string | null          // 수기처리 사유
-  memo: string | null            // 메모
-  toever_order_no: string | null // 연관 투에버 주문번호
-  created_by: string | null      // 작성자
+  date: string    // YYYY-MM-DD
+  name: string
+  source: HolidaySource
   created_at: string
-  updated_at: string
-}
-
-export interface ManualShipmentCreateParams {
-  manual_date: string
-  receiver_name: string
-  receiver_phone?: string
-  receiver_address?: string
-  product_name: string
-  option_name?: string
-  quantity: number
-  invoice_no?: string
-  courier_name?: string
-  reason?: string
-  memo?: string
-  toever_order_no?: string
-  created_by?: string
-}
-
-export interface ManualShipmentUpdateParams extends Partial<ManualShipmentCreateParams> {
-  id: number
-}
-
-export interface ManualShipmentSearchParams {
-  keyword?: string
-  date_from?: string
-  date_to?: string
-  courier_name?: string
-  page?: number
-  page_size?: number
 }
 
 export interface AppSettings {
@@ -505,7 +470,9 @@ export interface AppSettings {
   storage_base_path: string
   backup_path: string
   scheduler_enabled: boolean
-  morning_collect_time: string
-  afternoon_collect_time: string
+  collect_schedule: ScheduleTimeEntry[]
+  /** 투에버 송장 자동 업로드 시각 (HH:MM). 빈 문자열이면 자동 업로드 비활성화(수동 버튼만 사용) */
+  invoice_upload_time: string
   close_backup_time: string
+  public_data_api_key: string
 }

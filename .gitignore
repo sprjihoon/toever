@@ -17,6 +17,10 @@ build-browsers/
 D:/SpringToeverOps/
 E:/SpringToeverOpsBackup/
 
+# 개발 중 로컬 실행으로 생성되는 데이터/디버그 산출물 (원본 업로드 파일, 스크린샷 등)
+raw/
+screenshots/
+
 # OS
 .DS_Store
 Thumbs.db

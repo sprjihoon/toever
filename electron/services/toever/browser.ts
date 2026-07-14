@@ -1,9 +1,9 @@
-import { chromium, Browser, BrowserContext, Page } from 'playwright'
+import { chromium, Browser, BrowserContext, Page, Frame } from 'playwright'
 import path from 'path'
 import fs from 'fs'
 import { screenshotPath, DIRS, sha256OfBuffer } from '../storage'
 import { logToeverAction, saveFileArtifact, addManualReview } from '../db/repositories'
-import { isChromiumInstalled, copyBundledChromiumIfNeeded } from '../playwright/browserManager'
+import { isChromiumInstalled, copyBundledChromiumIfNeeded, getChromiumExecutablePath } from '../playwright/browserManager'
 
 const TOEVER_BASE          = 'https://support.toever.co.kr'
 const LOGIN_URL            = `${TOEVER_BASE}/Login/login.jsp`
@@ -26,6 +26,16 @@ const LOGIN_FAIL_MESSAGES  = [
 let browser: Browser | null = null
 let context: BrowserContext | null = null
 let page: Page | null = null
+let dialogHandlerAttached = false
+
+function attachDialogHandler(p: Page): void {
+  if (dialogHandlerAttached) return
+  dialogHandlerAttached = true
+  p.on('dialog', async (dialog) => {
+    console.log(`[browser] alert: ${dialog.message()}`)
+    await dialog.dismiss().catch(() => {})
+  })
+}
 
 export interface BrowserSession {
   page: Page
@@ -42,13 +52,17 @@ export async function launchBrowser(downloadDir: string): Promise<BrowserSession
     copyBundledChromiumIfNeeded()
   }
 
-  if (!isChromiumInstalled()) {
+  const executablePath = getChromiumExecutablePath()
+  if (!executablePath) {
     throw new Error(
       'Chromium이 설치되어 있지 않습니다. 설정 > 브라우저 설정에서 Chromium 설치 버튼을 눌러주세요.'
     )
   }
 
+  console.log(`[browser] Chromium 경로: ${executablePath}`)
+
   browser = await chromium.launch({
+    executablePath,
     headless: false,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   })
@@ -64,6 +78,7 @@ export async function launchBrowser(downloadDir: string): Promise<BrowserSession
   await context.route('**/*', route => route.continue())
 
   page = await context.newPage()
+  attachDialogHandler(page)
 
   return { page, context }
 }
@@ -75,6 +90,7 @@ export async function closeBrowser(): Promise<void> {
   browser = null
   context = null
   page = null
+  dialogHandlerAttached = false
 }
 
 export async function takeScreenshot(p: Page, label: string): Promise<string> {
@@ -83,25 +99,92 @@ export async function takeScreenshot(p: Page, label: string): Promise<string> {
   return dest
 }
 
+/** 로그인 form POST 후 프레임 리다이렉트 완료까지 대기 (느린 PC 대응) */
+async function waitForLoginRedirect(
+  p: Page,
+  frame: Frame | Page,
+  timeoutMs = 15000
+): Promise<{ success: boolean; frameUrl: string; frameContent: string }> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const frameUrl = frame.url()
+    const frameContent = await frame.content().catch(() => '')
+
+    // 명확한 실패
+    if (frameUrl.includes('check_sts=')) {
+      return { success: false, frameUrl, frameContent }
+    }
+    if (frameUrl.toLowerCase().includes('login.jsp')) {
+      return { success: false, frameUrl, frameContent }
+    }
+    if (frameContent.includes('p_login_id')) {
+      return { success: false, frameUrl, frameContent }
+    }
+
+    // 명확한 성공
+    if (
+      frameUrl.includes('idxFrame.jsp') ||
+      frameUrl.includes('orderDtlP') ||
+      frameContent.includes('order_dt_from')
+    ) {
+      return { success: true, frameUrl, frameContent }
+    }
+
+    // loginAction.jsp 중간 페이지: 성공 스크립트면 리다이렉트 대기
+    if (frameUrl.includes('loginAction.jsp')) {
+      const hasSuccessScript =
+        frameContent.includes('location.href="/idxFrame.jsp"') ||
+        frameContent.includes("location.href='/idxFrame.jsp'")
+      if (hasSuccessScript) {
+        await p.waitForTimeout(500)
+        continue
+      }
+    }
+
+    // loginAction을 벗어났고 로그인 폼이 없으면 성공으로 간주
+    if (!frameUrl.includes('loginAction.jsp')) {
+      return { success: true, frameUrl, frameContent }
+    }
+
+    await p.waitForTimeout(500)
+  }
+
+  const frameUrl = frame.url()
+  const frameContent = await frame.content().catch(() => '')
+  const success =
+    !frameUrl.includes('check_sts=') &&
+    !frameUrl.toLowerCase().includes('login.jsp') &&
+    !frameContent.includes('p_login_id')
+  return { success, frameUrl, frameContent }
+}
+
 /**
  * 현재 투에버 로그인 세션이 유효한지 확인한다.
  * 이미 로그인되어 있으면 재로그인하지 않는다.
  */
 export async function checkLoginSession(p: Page): Promise<boolean> {
   try {
-    // 발주내역 페이지로 직접 접속 시도
+    // 발주내역 페이지로 직접 접속 → 세션 유효하면 바로 로드, 아니면 login으로 리다이렉트
     await p.goto(ORDER_LIST_URL, { waitUntil: 'domcontentloaded', timeout: 20000 })
-    await p.waitForTimeout(1500)
+    await p.waitForTimeout(1000)
 
     const url = p.url()
-    const content = await p.content()
 
-    // 로그인 페이지로 리다이렉트되었으면 세션 만료
-    if (url.includes('login') || url.includes('Login')) return false
-    if (content.includes('loginAction') || content.includes('p_login_id')) return false
+    // 최상위 URL이 login 계열이면 세션 만료 (frameset root로 리다이렉트된 경우)
+    if (url.toLowerCase().includes('login')) return false
 
-    // 발주내역 화면 확인
-    if (content.includes('발주내역') || content.includes('orderDtlP')) return true
+    // mainFrm 또는 페이지 직접 확인
+    const mainFrm = p.frame({ name: 'mainFrm' })
+    const checkFrame = mainFrm ?? p
+    const frameUrl = checkFrame.url()
+    const content = await checkFrame.content()
+
+    // mainFrm이 로그인 페이지인 경우 (p_login_id는 로그인 폼의 고유 name)
+    if (frameUrl.toLowerCase().includes('login.jsp')) return false
+    if (content.includes('p_login_id') || content.includes('loginAction.jsp')) return false
+
+    // 발주내역 화면 요소가 있으면 세션 유효
+    if (content.includes('order_dt_from') || content.includes('발주내역')) return true
 
     return false
   } catch {
@@ -123,6 +206,15 @@ export async function loginToever(
   password: string,
   run_id?: number
 ): Promise<{ success: boolean; error?: string; screenshotPath?: string; sessionReused?: boolean }> {
+  const loginId = id.trim()
+  const loginPw = password.trim()
+
+  if (!loginId || !loginPw) {
+    return { success: false, error: '투에버 ID/비밀번호가 비어 있습니다. 설정에서 다시 입력해주세요.' }
+  }
+
+  attachDialogHandler(p)
+
   // 먼저 세션 확인
   const sessionValid = await checkLoginSession(p)
   if (sessionValid) {
@@ -130,61 +222,118 @@ export async function loginToever(
     return { success: true, sessionReused: true }
   }
 
-  // 로그인 시도 (최대 1회 재시도)
+  // 로그인 시도 (최대 2회)
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
+      // 로그인 페이지 로드 → 서버가 JSESSIONID(pre-session 쿠키)를 설정하게 함
       await p.goto(TOEVER_BASE, { waitUntil: 'domcontentloaded', timeout: 30000 })
       await p.waitForTimeout(1500)
 
-      // frameset 구조 - mainFrm 프레임 접근
       const mainFrame =
         p.frame({ name: 'mainFrm' }) ??
         p.frame({ url: /login\.jsp/i }) ??
         p
 
       await mainFrame.waitForSelector('input[name="p_login_id"]', { timeout: 15000 })
-      await mainFrame.fill('input[name="p_login_id"]', id)
-      await mainFrame.fill('input[name="p_password"]', password)
-
       await takeScreenshot(p, `before_login_attempt${attempt}`)
 
-      // 로그인 버튼 클릭
+      // ─────────────────────────────────────────────────────────────────
+      // 브라우저 내 form POST 방식 (가장 안정적)
+      //
+      // context.request.post()는 일부 PC/Electron 환경에서
+      // API 요청 쿠키와 page 쿠키가 동기화되지 않는 문제가 있음.
+      //
+      // form.submit()은 Chromium이 직접 POST + 쿠키를 처리하므로
+      // 모든 PC에서 동일하게 동작함.
+      // ─────────────────────────────────────────────────────────────────
+      // form.submit()은 mainFrm 내부에서 네비게이션 발생 → frame 기준으로 대기
       await Promise.all([
-        mainFrame.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {}),
-        mainFrame.click('input[type="image"][alt="로그인"]'),
+        mainFrame.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {}),
+        mainFrame.evaluate((creds: { id: string; pw: string }) => {
+          const old = document.getElementById('__toever_auto_login_form')
+          if (old) old.remove()
+
+          const form = document.createElement('form')
+          form.id = '__toever_auto_login_form'
+          form.method = 'POST'
+          form.action = '/Login/loginAction.jsp'
+          form.style.display = 'none'
+
+          for (const [name, value] of [['p_login_id', creds.id], ['p_password', creds.pw]] as const) {
+            const input = document.createElement('input')
+            input.type = 'hidden'
+            input.name = name
+            input.value = value
+            form.appendChild(input)
+          }
+
+          document.body.appendChild(form)
+          form.submit()
+        }, { id: loginId, pw: loginPw }),
       ])
-      await p.waitForTimeout(2000)
 
-      const pageContent = await p.content()
+      // loginAction.jsp → idxFrame.jsp JS 리다이렉트 대기 (느린 PC 포함)
+      const redirect = await waitForLoginRedirect(p, mainFrame)
+      await takeScreenshot(p, `after_login_form_attempt${attempt}`)
 
-      // 계정 잠김 감지 → 즉시 중단 (재시도 금지)
-      if (pageContent.includes('계정이 잠겼습니다') || pageContent.includes('5회 실패')) {
+      console.log(`[login] form 후 success=${redirect.success} frameUrl=${redirect.frameUrl}`)
+
+      let failMsg: string | null = null
+
+      const pageUrl = p.url()
+      const frameUrl = redirect.frameUrl
+      const frameContent = redirect.frameContent
+
+      // 계정 잠김
+      if (
+        pageUrl.includes('check_sts=5') ||
+        frameUrl.includes('check_sts=5') ||
+        frameContent.includes('잠겼습니다') ||
+        frameContent.includes('5회 실패')
+      ) {
         const errSs = await takeScreenshot(p, 'login_account_locked')
-        const errMsg = '계정이 잠겼습니다. 관리자에게 문의하세요.'
+        const errMsg = '계정이 잠겼습니다. 투에버 관리자에게 문의하세요.'
         logToeverAction({ run_id, action_type: 'LOGIN', target_url: TOEVER_BASE, result_status: 'LOCKED', result_message: errMsg, screenshot_path: errSs })
         return { success: false, error: errMsg, screenshotPath: errSs }
       }
 
-      // 일반 로그인 실패 확인
-      let failMsg: string | null = null
-      for (const msg of LOGIN_FAIL_MESSAGES) {
-        if (pageContent.includes(msg)) { failMsg = msg; break }
+      // 로그인 실패
+      if (!redirect.success) {
+        failMsg = '아이디 또는 비밀번호가 올바르지 않습니다. 설정에서 투에버 계정을 확인해주세요.'
       }
 
       if (failMsg) {
         const errSs = await takeScreenshot(p, `login_failed_attempt${attempt}`)
         logToeverAction({ run_id, action_type: 'LOGIN', target_url: TOEVER_BASE, result_status: 'FAIL', result_message: failMsg, screenshot_path: errSs })
-
         if (attempt === 2) {
-          // 2회 시도 완료 → 중단
-          return { success: false, error: `로그인 실패 (2회 시도): ${failMsg}`, screenshotPath: errSs }
+          return { success: false, error: `로그인 실패: ${failMsg}`, screenshotPath: errSs }
         }
-        // 1회 더 시도
         await p.waitForTimeout(2000)
         continue
       }
 
-      // 로그인 성공 확인
+      // ─── 로그인 성공 후 세션 검증 ────────────────────────────────────
+      await p.goto(ORDER_LIST_URL, { waitUntil: 'domcontentloaded', timeout: 20000 })
+      await p.waitForTimeout(2000)
+
+      const verifyFrame   = p.frame({ name: 'mainFrm' }) ?? p
+      const verifyUrl     = verifyFrame.url()
+      const verifyContent = await verifyFrame.content().catch(() => '')
+
+      if (
+        verifyUrl.toLowerCase().includes('login.jsp') ||
+        verifyContent.includes('p_login_id')
+      ) {
+        failMsg = '세션이 유효하지 않습니다. 설정에서 투에버 ID/비밀번호를 다시 확인해주세요.'
+        const errSs = await takeScreenshot(p, `login_session_invalid_attempt${attempt}`)
+        logToeverAction({ run_id, action_type: 'LOGIN', target_url: TOEVER_BASE, result_status: 'FAIL', result_message: failMsg, screenshot_path: errSs })
+        if (attempt === 2) {
+          return { success: false, error: `로그인 실패: ${failMsg}`, screenshotPath: errSs }
+        }
+        await p.waitForTimeout(2000)
+        continue
+      }
+
       const successSs = await takeScreenshot(p, 'login_success')
       logToeverAction({ run_id, action_type: 'LOGIN', target_url: TOEVER_BASE, result_status: 'SUCCESS', screenshot_path: successSs })
       return { success: true, screenshotPath: successSs }
@@ -195,6 +344,7 @@ export async function loginToever(
         logToeverAction({ run_id, action_type: 'LOGIN', target_url: TOEVER_BASE, result_status: 'ERROR', result_message: String(e), screenshot_path: errSs })
         return { success: false, error: String(e), screenshotPath: errSs }
       }
+      await p.waitForTimeout(2000)
     }
   }
 
@@ -212,12 +362,28 @@ export async function downloadToeverOrders(
   run_id?: number
 ): Promise<{ success: boolean; filePath?: string; error?: string }> {
   try {
-    await p.goto(ORDER_LIST_URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
-    await p.waitForTimeout(2000)
+    // loginToever 직후에는 이미 ORDER_LIST_URL에 있으므로 중복 이동 건너뜀
+    const pageUrl   = p.url()
+    const mainFrmNow = p.frame({ name: 'mainFrm' })
+    const alreadyOnOrderPage =
+      pageUrl.includes('orderDtlP') ||
+      (mainFrmNow != null && mainFrmNow.url().includes('orderDtlP'))
 
+    if (!alreadyOnOrderPage) {
+      await p.goto(ORDER_LIST_URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
+      await p.waitForTimeout(2000)
+    }
+
+    // frameset 구조인 경우 mainFrm 내부, 직접 로딩인 경우 page 자체 사용
     const targetFrame = p.frame({ name: 'mainFrm' }) ?? p.frame({ url: /orderDtlP/ }) ?? p
 
-    await targetFrame.waitForSelector('input[name="order_dt_from"]', { timeout: 15000 })
+    // 세션 만료 시 로그인 페이지로 리다이렉트됐는지 확인
+    const currentUrl = targetFrame.url()
+    if (currentUrl.includes('login') || currentUrl.includes('Login')) {
+      return { success: false, error: '세션이 만료되었습니다. 다시 로그인이 필요합니다.' }
+    }
+
+    await targetFrame.waitForSelector('input[name="order_dt_from"]', { timeout: 20000 })
 
     // 날짜 입력
     const dateFromHidden = dateFrom.replace(/-/g, '')  // YYYYMMDD
@@ -456,149 +622,6 @@ export async function uploadToeverInvoice(
       screenshot_path: errSs,
     })
     return { success: false, error: String(e), screenshotPath: errSs }
-  }
-}
-
-/**
- * 출고작업지시 처리
- * - 실제 체크박스 클릭 방식 사용
- * - dryRun=true: 체크박스 선택/submit 없이 대상 발주번호 목록만 반환
- * - 자동 재시도 금지
- * - 결과 불명확 시 수동검토 큐 등록
- */
-export async function processStoreoutInstruction(
-  p: Page,
-  poNos: string[],
-  run_id?: number,
-  dryRun = false,
-): Promise<{
-  success: boolean
-  dryRun?: boolean
-  processedPoNos: string[]
-  failedPoNos: string[]
-  unclearPoNos: string[]
-  screenshotPath?: string
-  error?: string
-}> {
-  try {
-    await p.goto(ORDER_LIST_URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
-    await p.waitForTimeout(2000)
-
-    const targetFrame = p.frame({ name: 'mainFrm' }) ?? p
-
-    // 출고작업지시 대상 체크박스 찾기
-    const checkboxes = await targetFrame.$$('input[name="selected_order_key_chk"]')
-    const processedPoNos: string[] = []
-    const failedPoNos: string[] = []
-    const unclearPoNos: string[] = []
-
-    for (const checkbox of checkboxes) {
-      const value = await checkbox.getAttribute('value') ?? ''
-      // value 예시: 01||9001||20260708||00001||0190012026070800001||00309599
-      const parts = value.split('||')
-      const poNo = parts[4] ?? ''  // 인덱스 4 = 발주번호
-
-      if (poNos.includes(poNo)) {
-        if (!dryRun) await checkbox.click()
-        processedPoNos.push(poNo)
-      }
-    }
-
-    if (processedPoNos.length === 0) {
-      return {
-        success: false,
-        dryRun,
-        processedPoNos: [],
-        failedPoNos: poNos,
-        unclearPoNos: [],
-        error: '체크박스에서 발주번호를 찾지 못했습니다.',
-      }
-    }
-
-    // Dry-run: 체크박스 클릭/submit 없이 대상 목록만 반환
-    if (dryRun) {
-      const beforeSs = await takeScreenshot(p, 'storeout_dryrun_preview')
-      logToeverAction({
-        run_id,
-        action_type: 'STOREOUT_INSTRUCT',
-        target_url: ORDER_LIST_URL,
-        payload: JSON.stringify({ poNos: processedPoNos, dryRun: true }),
-        result_status: 'SKIP',
-        result_message: `DRY_RUN — ${processedPoNos.length}건 대상 확인, submit 안 함`,
-        screenshot_path: beforeSs,
-      })
-      return {
-        success: true,
-        dryRun: true,
-        processedPoNos,
-        failedPoNos: poNos.filter(p => !processedPoNos.includes(p)),
-        unclearPoNos: [],
-        screenshotPath: beforeSs,
-      }
-    }
-
-    const beforeSs = await takeScreenshot(p, 'storeout_before_submit')
-
-    // 출고작업지시 submit
-    const dialogPromise = p.waitForEvent('dialog', { timeout: 5000 }).catch(() => null)
-    await targetFrame.evaluate(() => {
-      if (typeof (window as any).submitSelectedOrders === 'function') {
-        (window as any).submitSelectedOrders()
-      }
-    })
-
-    const dialog = await dialogPromise
-    if (dialog) {
-      await dialog.accept()
-    }
-
-    await p.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
-    await p.waitForTimeout(3000)
-
-    const afterSs = await takeScreenshot(p, 'storeout_after_submit')
-    const resultContent = await p.content()
-
-    const isSuccess = resultContent.includes('처리') && !resultContent.includes('오류') && !resultContent.includes('실패')
-    const isUnclear = !isSuccess && !resultContent.includes('오류')
-
-    if (isUnclear) {
-      unclearPoNos.push(...processedPoNos)
-      // 자동 재시도 금지 — 수동검토 큐에 등록
-      addManualReview({
-        review_type: 'STOREOUT_UNCLEAR',
-        severity: 'HIGH',
-        run_id,
-        error_message: `출고작업지시 결과 불명확: ${processedPoNos.join(', ')}`,
-        recommended_action: '투에버 발주내역 화면에서 출고작업지시 상태 수동 확인 후 처리',
-      })
-    }
-
-    logToeverAction({
-      run_id,
-      action_type: 'STOREOUT_INSTRUCT',
-      target_url: ORDER_LIST_URL,
-      payload: JSON.stringify({ poNos: processedPoNos }),
-      result_status: isSuccess ? 'SUCCESS' : isUnclear ? 'UNCLEAR' : 'FAIL',
-      screenshot_path: afterSs,
-    })
-
-    return {
-      success: isSuccess,
-      processedPoNos,
-      failedPoNos,
-      unclearPoNos,
-      screenshotPath: afterSs,
-    }
-  } catch (e) {
-    const errSs = await takeScreenshot(p, 'storeout_error').catch(() => '')
-    return {
-      success: false,
-      processedPoNos: [],
-      failedPoNos: poNos,
-      unclearPoNos: [],
-      error: String(e),
-      screenshotPath: errSs,
-    }
   }
 }
 

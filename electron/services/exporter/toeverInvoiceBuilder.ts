@@ -8,8 +8,8 @@
  *
  * 처리 규칙:
  * - 두 컬럼 모두 텍스트 서식 강제 (앞자리 0 / 긴 숫자 보존)
- * - 같은 주문번호는 1줄만 생성
- * - INVOICE_IMPORTED 또는 TOEVER_INVOICE_READY 상태 + 송장번호 있는 주문만 포함
+ * - 같은 주문번호에 복수 송장이 있으면 각각 별도 행 생성
+ * - INVOICE_IMPORTED 또는 TOEVER_INVOICE_READY 상태 + 송장번호 있는 건만 포함
  */
 
 import XLSX from 'xlsx'
@@ -17,40 +17,38 @@ import path from 'path'
 import fs from 'fs'
 import { DIRS, buildDatePrefix, sha256OfBuffer } from '../storage'
 import { saveFileArtifact, updateOrderStatus } from '../db/repositories'
-import type { OrderHeader } from '../../../shared/types'
+import type { ToeverInvoiceUploadRow } from '../../../shared/types'
 
-export function buildToeverInvoiceUploadFile(
-  orders: OrderHeader[],
-  run_id?: number
-): { filePath: string; rowCount: number } {
-  if (orders.length === 0) throw new Error('송장 업로드 대상 주문이 없습니다.')
-
-  // 중복 제거: 같은 주문번호는 1줄만
+function dedupeToeverInvoiceRows(rows: ToeverInvoiceUploadRow[]): {
+  outputRows: Array<{ 주문번호: string; 송장번호: string }>
+  orderIds: Set<number>
+} {
   const seen = new Set<string>()
-  const rows: Array<{ 주문번호: string; 송장번호: string }> = []
+  const outputRows: Array<{ 주문번호: string; 송장번호: string }> = []
+  const orderIds = new Set<number>()
 
-  for (const order of orders) {
-    if (seen.has(order.toever_order_no)) continue
-    if (!order.latest_invoice_no) continue
+  for (const row of rows) {
+    if (!row.invoice_no) continue
+    const key = `${row.toever_order_no}|${row.invoice_no}`
+    if (seen.has(key)) continue
 
-    seen.add(order.toever_order_no)
-    rows.push({
-      주문번호: String(order.toever_order_no),   // TEXT 강제
-      송장번호: String(order.latest_invoice_no),  // TEXT 강제
+    seen.add(key)
+    orderIds.add(row.order_id)
+    outputRows.push({
+      주문번호: String(row.toever_order_no),
+      송장번호: String(row.invoice_no),
     })
   }
 
-  if (rows.length === 0) throw new Error('송장번호가 있는 주문이 없습니다.')
+  return { outputRows, orderIds }
+}
 
-  // 워크북 생성
+function buildToeverInvoiceWorkbook(outputRows: Array<{ 주문번호: string; 송장번호: string }>) {
   const wb = XLSX.utils.book_new()
+  const wsData = XLSX.utils.json_to_sheet(outputRows, { header: ['주문번호', '송장번호'] })
 
-  // Sheet1: 주문번호, 송장번호
-  const wsData = XLSX.utils.json_to_sheet(rows, { header: ['주문번호', '송장번호'] })
-
-  // 주문번호(A), 송장번호(B) 모두 텍스트 서식 강제
   const range = XLSX.utils.decode_range(wsData['!ref'] ?? 'A1')
-  for (let R = range.s.r + 1; R <= range.s.r + rows.length; R++) {
+  for (let R = range.s.r + 1; R <= range.s.r + outputRows.length; R++) {
     for (let C = 0; C <= 1; C++) {
       const addr = XLSX.utils.encode_cell({ r: R, c: C })
       if (wsData[addr]) {
@@ -61,7 +59,6 @@ export function buildToeverInvoiceUploadFile(
   }
   XLSX.utils.book_append_sheet(wb, wsData, 'Sheet1')
 
-  // 택배사번호 참고 시트 (upload_form.xls 원본 구조 유지)
   const courierData = [
     { 택배사번호: '45006', 택배사: '우체국택배(물류)' },
     { 택배사번호: '42003', 택배사: '우체국' },
@@ -73,16 +70,52 @@ export function buildToeverInvoiceUploadFile(
   const wsCourier = XLSX.utils.json_to_sheet(courierData, { header: ['택배사번호', '택배사'] })
   XLSX.utils.book_append_sheet(wb, wsCourier, '택배사번호')
 
-  // 파일 저장 (투에버 업로드용 xls = BIFF8)
+  return wb
+}
+
+/** 업로드 전 확인용 — DB/주문 상태 변경 없음 */
+export function buildToeverInvoiceUploadPreviewFile(
+  rows: ToeverInvoiceUploadRow[]
+): { filePath: string; rowCount: number; rows: Array<{ order_no: string; invoice_no: string }> } {
+  if (rows.length === 0) throw new Error('송장 업로드 대상 주문이 없습니다.')
+
+  const { outputRows } = dedupeToeverInvoiceRows(rows)
+  if (outputRows.length === 0) throw new Error('송장번호가 있는 주문이 없습니다.')
+
+  const dir = path.join(DIRS.generatedToeverInvoiceUpload(), 'preview')
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+
+  const datePrefix = buildDatePrefix()
+  const filename = `${datePrefix}_toever_invoice_upload_preview_${Date.now()}.xls`
+  const filePath = path.join(dir, filename)
+
+  const buf = XLSX.write(buildToeverInvoiceWorkbook(outputRows), { bookType: 'biff8', type: 'buffer' }) as Buffer
+  fs.writeFileSync(filePath, buf)
+
+  return {
+    filePath,
+    rowCount: outputRows.length,
+    rows: outputRows.map(r => ({ order_no: r.주문번호, invoice_no: r.송장번호 })),
+  }
+}
+
+export function buildToeverInvoiceUploadFile(
+  rows: ToeverInvoiceUploadRow[],
+  run_id?: number
+): { filePath: string; rowCount: number } {
+  if (rows.length === 0) throw new Error('송장 업로드 대상 주문이 없습니다.')
+
+  const { outputRows, orderIds } = dedupeToeverInvoiceRows(rows)
+  if (outputRows.length === 0) throw new Error('송장번호가 있는 주문이 없습니다.')
+
   const dir = DIRS.generatedToeverInvoiceUpload()
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
 
   const datePrefix = buildDatePrefix()
-  const ts = Date.now()
-  const filename = `${datePrefix}_toever_invoice_upload_${ts}.xls`
+  const filename = `${datePrefix}_toever_invoice_upload_${Date.now()}.xls`
   const filePath = path.join(dir, filename)
 
-  const buf = XLSX.write(wb, { bookType: 'biff8', type: 'buffer' }) as Buffer
+  const buf = XLSX.write(buildToeverInvoiceWorkbook(outputRows), { bookType: 'biff8', type: 'buffer' }) as Buffer
   fs.writeFileSync(filePath, buf)
 
   const sha256 = sha256OfBuffer(buf)
@@ -95,12 +128,9 @@ export function buildToeverInvoiceUploadFile(
     run_id: run_id ?? null,
   })
 
-  // 상태 TOEVER_INVOICE_READY로 변경
-  for (const order of orders) {
-    if (seen.has(order.toever_order_no)) {
-      updateOrderStatus(order.id, 'TOEVER_INVOICE_READY')
-    }
+  for (const orderId of orderIds) {
+    updateOrderStatus(orderId, 'TOEVER_INVOICE_READY')
   }
 
-  return { filePath, rowCount: rows.length }
+  return { filePath, rowCount: outputRows.length }
 }

@@ -7,6 +7,7 @@ import { registerIpcHandlers } from './ipc/handlers'
 import { startScheduler, setMainWindow } from './services/scheduler'
 import { initPlaywrightBrowserPath } from './services/playwright/browserManager'
 import { readRestoreMarker } from './services/restore'
+import { seedHardcodedHolidays } from './services/holidaySync'
 
 // Playwright Chromium을 userData/browsers에 설치하도록 경로 먼저 설정
 initPlaywrightBrowserPath()
@@ -30,7 +31,7 @@ function createWindow(): void {
     height: 900,
     minWidth: 1100,
     minHeight: 700,
-    title: 'Spring Toever Ops',
+    title: `Spring Toever Ops v${app.getVersion()}`,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -108,6 +109,12 @@ app.whenReady().then(() => {
     ensureAllDirs()
   } catch {
     console.warn('[main] 저장소 디렉토리 생성 실패 - 설정에서 경로를 변경하세요.')
+  }
+
+  try {
+    seedHardcodedHolidays()
+  } catch (e) {
+    console.warn('[main] 공휴일 시드 데이터 반영 실패', e)
   }
 
   createWindow()

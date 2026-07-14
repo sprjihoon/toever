@@ -7,7 +7,7 @@ import type {
   DashboardStats, SearchOrdersParams, OrderDetail,
   ReportParams, ReportData, ReportPeriod,
   ReportWidgetConfig, ReportTemplate, ReportBuildParams, WidgetResult, WidgetType,
-  ManualShipment, ManualShipmentCreateParams, ManualShipmentSearchParams,
+  ToeverInvoiceUploadRow, AppHoliday, ScheduleTimeEntry,
 } from '../../../shared/types'
 
 // ============================================================
@@ -168,13 +168,116 @@ export function getOrdersForToeverInvoiceUpload(): OrderHeader[] {
   `).all() as OrderHeader[]
 }
 
-/** 출고작업지시 대상: 송장 업로드 완료 주문 */
-export function getOrdersForStoreout(): OrderHeader[] {
-  return getDb().prepare(`
-    SELECT * FROM order_header
-    WHERE status = 'TOEVER_INVOICE_UPLOADED'
-    ORDER BY toever_order_no
-  `).all() as OrderHeader[]
+/**
+ * 투에버 송장 업로드 파일용 행 목록.
+ * 같은 주문번호에 복수 송장이 있으면 각각 별도 행으로 반환.
+ */
+export function getToeverInvoiceUploadRows(): ToeverInvoiceUploadRow[] {
+  const db = getDb()
+
+  // invoice_event 기준 (복수 송장 지원)
+  const fromEvents = db.prepare(`
+    SELECT h.id AS order_id, h.toever_order_no, e.invoice_no, h.receiver_name, h.status
+    FROM order_header h
+    INNER JOIN invoice_event e ON e.order_id = h.id
+    WHERE h.status IN ('INVOICE_IMPORTED', 'TOEVER_INVOICE_READY')
+      AND e.status = 'MATCHED'
+      AND e.invoice_no IS NOT NULL AND e.invoice_no != ''
+    ORDER BY h.toever_order_no, e.id
+  `).all() as ToeverInvoiceUploadRow[]
+
+  // invoice_event 없는 구버전 주문 fallback (혼합 환경에서도 누락 없음)
+  const legacyOnly = db.prepare(`
+    SELECT h.id AS order_id, h.toever_order_no, h.latest_invoice_no AS invoice_no, h.receiver_name, h.status
+    FROM order_header h
+    WHERE h.status IN ('INVOICE_IMPORTED', 'TOEVER_INVOICE_READY')
+      AND h.latest_invoice_no IS NOT NULL AND h.latest_invoice_no != ''
+      AND NOT EXISTS (
+        SELECT 1 FROM invoice_event e
+        WHERE e.order_id = h.id AND e.status = 'MATCHED'
+      )
+    ORDER BY h.toever_order_no
+  `).all() as ToeverInvoiceUploadRow[]
+
+  return [...fromEvents, ...legacyOnly]
+}
+
+/** 송장 import 완료 이전 상태의 오늘 주문만 삭제 (송장 데이터 보존) */
+const CLEARABLE_ORDER_STATUSES: OrderStatus[] = [
+  'COLLECTED',
+  'NEW_SHIPMENT_TARGET',
+  'DUPLICATE_SKIPPED',
+  'ORDER_CHANGED_REVIEW',
+  'EXPORTED_TO_EZADMIN',
+]
+
+export function clearTodayOrderData(orderDate: string): { cleared: number; preserved: number } {
+  const db = getDb()
+  const placeholders = CLEARABLE_ORDER_STATUSES.map(() => '?').join(', ')
+
+  const toClear = db.prepare(`
+    SELECT id, toever_order_no, ezadmin_batch_id
+    FROM order_header
+    WHERE order_date = ?
+      AND status IN (${placeholders})
+  `).all(orderDate, ...CLEARABLE_ORDER_STATUSES) as Array<{
+    id: number
+    toever_order_no: string
+    ezadmin_batch_id: number | null
+  }>
+
+  const preservedRow = db.prepare(`
+    SELECT COUNT(*) AS cnt FROM order_header
+    WHERE order_date = ?
+      AND status NOT IN (${placeholders})
+  `).get(orderDate, ...CLEARABLE_ORDER_STATUSES) as { cnt: number }
+
+  const batchIds = [...new Set(toClear.map(o => o.ezadmin_batch_id).filter((id): id is number => id != null))]
+
+  const todayCollectRunIds = (
+    db.prepare(`
+    SELECT id FROM app_run
+    WHERE run_type = 'COLLECT_ORDERS' AND business_date = ?
+  `).all(orderDate) as { id: number }[]
+  ).map(r => r.id)
+
+  const detachRunRefs = (runIds: number[]) => {
+    if (runIds.length === 0) return
+    const runPh = runIds.map(() => '?').join(', ')
+    db.prepare(`UPDATE order_header SET source_run_id = NULL WHERE source_run_id IN (${runPh})`).run(...runIds)
+    db.prepare(`UPDATE file_artifact SET run_id = NULL WHERE run_id IN (${runPh})`).run(...runIds)
+    db.prepare(`UPDATE toever_action_log SET run_id = NULL WHERE run_id IN (${runPh})`).run(...runIds)
+    db.prepare(`UPDATE manual_review_queue SET run_id = NULL WHERE run_id IN (${runPh})`).run(...runIds)
+  }
+
+  const runClear = db.transaction(() => {
+    // 1) app_run 삭제 전 FK 참조 전부 해제 (toever_action_log 누락 시 FK 실패)
+    detachRunRefs(todayCollectRunIds)
+
+    // 2) 이지어드민 배치 취소
+    for (const batchId of batchIds) {
+      cancelEzadminBatch(batchId, '오늘 데이터 초기화')
+    }
+
+    // 3) 초기화 대상 주문 삭제 (송장 import 완료 주문은 toClear에 없음)
+    for (const order of toClear) {
+      db.prepare('DELETE FROM invoice_event WHERE order_id = ?').run(order.id)
+      db.prepare('DELETE FROM manual_review_queue WHERE toever_order_no = ?').run(order.toever_order_no)
+      db.prepare('UPDATE order_header SET ezadmin_batch_id = NULL WHERE id = ?').run(order.id)
+      db.prepare('DELETE FROM order_header WHERE id = ?').run(order.id)
+    }
+
+    // 4) 오늘 수집 run 삭제 → 재수집 가능 (삭제 직전 한 번 더 FK 해제)
+    if (todayCollectRunIds.length > 0) {
+      detachRunRefs(todayCollectRunIds)
+      const runPh = todayCollectRunIds.map(() => '?').join(', ')
+      db.prepare(`DELETE FROM app_run WHERE id IN (${runPh})`).run(...todayCollectRunIds)
+    }
+  })
+
+  runClear()
+
+  return { cleared: toClear.length, preserved: preservedRow.cnt }
 }
 
 export function searchOrders(params: SearchOrdersParams): { orders: OrderHeader[]; total: number } {
@@ -498,6 +601,97 @@ export function getAllSettings(): Record<string, string> {
   return Object.fromEntries(rows.map(r => [r.key, r.value]))
 }
 
+const DEFAULT_SCHEDULE: ScheduleTimeEntry[] = [
+  { id: 'morning', time: '10:30', label: '오전 수집' },
+  { id: 'afternoon', time: '15:30', label: '오후 수집' },
+]
+
+/**
+ * 자동 주문수집 스케줄 목록 조회.
+ * - 'collect_schedule' 설정이 없으면 구버전 morning_collect_time/afternoon_collect_time 값(있으면)
+ *   또는 기본값으로 마이그레이션하여 최초 1회 저장한다.
+ */
+export function getScheduleTimes(): ScheduleTimeEntry[] {
+  const raw = getSetting('collect_schedule')
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as ScheduleTimeEntry[]
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed
+    } catch {
+      // 파싱 실패 시 기본값으로 폴백
+    }
+  }
+
+  // 구버전 설정값 마이그레이션
+  const legacyMorning = getSetting('morning_collect_time')
+  const legacyAfternoon = getSetting('afternoon_collect_time')
+  const migrated: ScheduleTimeEntry[] = legacyMorning || legacyAfternoon
+    ? [
+        { id: 'morning', time: legacyMorning ?? '10:30', label: '오전 수집' },
+        { id: 'afternoon', time: legacyAfternoon ?? '15:30', label: '오후 수집' },
+      ]
+    : DEFAULT_SCHEDULE
+
+  setScheduleTimes(migrated)
+  return migrated
+}
+
+export function setScheduleTimes(entries: ScheduleTimeEntry[]): void {
+  setSetting('collect_schedule', JSON.stringify(entries))
+}
+
+// ============================================================
+// 휴일 (스케줄러 자동수집/백업 스킵)
+// ============================================================
+
+export function getHolidays(date_from?: string, date_to?: string): AppHoliday[] {
+  const db = getDb()
+  if (date_from && date_to) {
+    return db.prepare(
+      'SELECT * FROM app_holiday WHERE date BETWEEN ? AND ? ORDER BY date ASC'
+    ).all(date_from, date_to) as AppHoliday[]
+  }
+  return db.prepare('SELECT * FROM app_holiday ORDER BY date ASC').all() as AppHoliday[]
+}
+
+export function isHoliday(date: string): boolean {
+  const row = getDb().prepare('SELECT 1 FROM app_holiday WHERE date = ? LIMIT 1').get(date)
+  return row != null
+}
+
+export function addCompanyHoliday(date: string, name: string): AppHoliday {
+  const db = getDb()
+  db.prepare(
+    `INSERT OR REPLACE INTO app_holiday (date, name, source) VALUES (?, ?, 'COMPANY')`
+  ).run(date, name)
+  return db.prepare(
+    `SELECT * FROM app_holiday WHERE date = ? AND source = 'COMPANY'`
+  ).get(date) as AppHoliday
+}
+
+export function deleteHoliday(id: number): void {
+  getDb().prepare('DELETE FROM app_holiday WHERE id = ?').run(id)
+}
+
+/**
+ * 공공/시드 출처 휴일 일괄 반영 (회사 지정 휴일은 건드리지 않음)
+ * - source별 (date, source) UNIQUE 인덱스로 동일 출처의 기존 값을 덮어씀
+ */
+export function upsertPublicHolidays(
+  items: { date: string; name: string }[],
+  source: 'PUBLIC_SEED' | 'PUBLIC_API'
+): number {
+  const db = getDb()
+  const stmt = db.prepare(
+    'INSERT OR REPLACE INTO app_holiday (date, name, source) VALUES (?, ?, ?)'
+  )
+  const tx = db.transaction((rows: { date: string; name: string }[]) => {
+    for (const r of rows) stmt.run(r.date, r.name, source)
+  })
+  tx(items)
+  return items.length
+}
+
 // ============================================================
 // Dashboard
 // ============================================================
@@ -510,14 +704,19 @@ export function getDashboardStats(today: string): DashboardStats {
     return row.cnt
   }
 
-  const morning = count(
-    "SELECT COUNT(*) as cnt FROM app_run WHERE run_type='COLLECT_ORDERS' AND business_date=? AND collect_round='morning' AND status='SUCCESS'",
-    today
-  )
-  const afternoon = count(
-    "SELECT COUNT(*) as cnt FROM app_run WHERE run_type='COLLECT_ORDERS' AND business_date=? AND collect_round='afternoon' AND status='SUCCESS'",
-    today
-  )
+  const roundRows = db.prepare(
+    `SELECT collect_round AS round, COUNT(*) AS cnt
+     FROM app_run
+     WHERE run_type='COLLECT_ORDERS' AND business_date=? AND status='SUCCESS' AND collect_round IS NOT NULL AND collect_round != 'manual'
+     GROUP BY collect_round`
+  ).all(today) as { round: string; cnt: number }[]
+
+  const scheduleLabels = new Map(getScheduleTimes().map(s => [s.id, s.label]))
+  const collect_by_round = roundRows.map(r => ({
+    round: r.round,
+    label: scheduleLabels.get(r.round) ?? r.round,
+    count: r.cnt,
+  }))
 
   const statusCount = (status: string) => count(
     'SELECT COUNT(*) as cnt FROM order_header WHERE order_date = ? AND status = ?',
@@ -531,8 +730,7 @@ export function getDashboardStats(today: string): DashboardStats {
   return {
     today,
     total_collected: count('SELECT COUNT(*) as cnt FROM order_header WHERE order_date = ?', today),
-    morning_collected: morning,
-    afternoon_collected: afternoon,
+    collect_by_round,
     new_shipment_targets: statusCount('NEW_SHIPMENT_TARGET'),
     duplicate_skipped: statusCount('DUPLICATE_SKIPPED'),
     order_changed_review: statusCount('ORDER_CHANGED_REVIEW'),
@@ -596,7 +794,6 @@ export function getReportData(params: ReportParams): ReportData {
   const db = getDb()
   const { date_from, date_to, period } = params
   const pExpr = periodExpr(period)
-  const mPExpr = periodExpr(period, 'ms.manual_date')
 
   // 요약 집계
   const summaryRow = db.prepare(`
@@ -614,17 +811,8 @@ export function getReportData(params: ReportParams): ReportData {
     total_quantity: number; distinct_products: number
   }
 
-  // 수기건 요약
-  const manualSummaryRow = db.prepare(`
-    SELECT
-      COUNT(*)              AS total_manual,
-      COALESCE(SUM(quantity),0) AS total_manual_quantity
-    FROM manual_shipment
-    WHERE substr(manual_date,1,10) BETWEEN ? AND ?
-  `).get(date_from, date_to) as { total_manual: number; total_manual_quantity: number }
-
-  // 기간별 트렌드 (수기건 LEFT JOIN)
-  const trendRaw = db.prepare(`
+  // 기간별 트렌드
+  const trend = db.prepare(`
     SELECT
       ${pExpr}                                                                    AS period_label,
       COUNT(DISTINCT h.id)                                                        AS orders,
@@ -637,26 +825,6 @@ export function getReportData(params: ReportParams): ReportData {
     GROUP BY period_label
     ORDER BY period_label ASC
   `).all(date_from, date_to) as { period_label: string; orders: number; shipped: number; quantity: number }[]
-
-  // 수기건 기간별 집계
-  const manualTrendRaw = db.prepare(`
-    SELECT
-      ${mPExpr}                AS period_label,
-      COUNT(*)                 AS count,
-      COALESCE(SUM(quantity),0) AS quantity
-    FROM manual_shipment ms
-    WHERE substr(ms.manual_date,1,10) BETWEEN ? AND ?
-    GROUP BY period_label
-    ORDER BY period_label ASC
-  `).all(date_from, date_to) as { period_label: string; count: number; quantity: number }[]
-
-  // 트렌드에 수기건 merge
-  const manualMap = new Map(manualTrendRaw.map(r => [r.period_label, r]))
-  const trend = trendRaw.map(r => ({
-    ...r,
-    manual_count:    manualMap.get(r.period_label)?.count    ?? 0,
-    manual_quantity: manualMap.get(r.period_label)?.quantity ?? 0,
-  }))
 
   // 최다 출고 제품 TOP 20
   const top_products = db.prepare(`
@@ -716,106 +884,12 @@ export function getReportData(params: ReportParams): ReportData {
 
   return {
     summary: summaryRow,
-    manual_summary: manualSummaryRow,
     trend,
     top_products,
     by_region,
     by_courier,
     by_status,
-    manual_by_period: manualTrendRaw,
   }
-}
-
-// ============================================================
-// ManualShipment (수기건)
-// ============================================================
-
-export function createManualShipment(data: ManualShipmentCreateParams): ManualShipment {
-  const db = getDb()
-  const result = db.prepare(`
-    INSERT INTO manual_shipment
-      (manual_date, receiver_name, receiver_phone, receiver_address,
-       product_name, option_name, quantity, invoice_no, courier_name,
-       reason, memo, toever_order_no, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    data.manual_date,
-    data.receiver_name,
-    data.receiver_phone ?? null,
-    data.receiver_address ?? null,
-    data.product_name,
-    data.option_name ?? null,
-    data.quantity,
-    data.invoice_no ?? null,
-    data.courier_name ?? null,
-    data.reason ?? null,
-    data.memo ?? null,
-    data.toever_order_no ?? null,
-    data.created_by ?? null,
-  )
-  return db.prepare('SELECT * FROM manual_shipment WHERE id = ?').get(result.lastInsertRowid) as ManualShipment
-}
-
-export function updateManualShipment(id: number, data: Partial<ManualShipmentCreateParams>): void {
-  const db = getDb()
-  const fields: string[] = []
-  const values: unknown[] = []
-
-  const map: Record<string, unknown> = {
-    manual_date: data.manual_date, receiver_name: data.receiver_name,
-    receiver_phone: data.receiver_phone, receiver_address: data.receiver_address,
-    product_name: data.product_name, option_name: data.option_name,
-    quantity: data.quantity, invoice_no: data.invoice_no,
-    courier_name: data.courier_name, reason: data.reason,
-    memo: data.memo, toever_order_no: data.toever_order_no,
-    created_by: data.created_by,
-  }
-
-  for (const [k, v] of Object.entries(map)) {
-    if (v !== undefined) {
-      fields.push(`${k} = ?`)
-      values.push(v ?? null)
-    }
-  }
-  if (fields.length === 0) return
-  fields.push(`updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`)
-  values.push(id)
-  db.prepare(`UPDATE manual_shipment SET ${fields.join(', ')} WHERE id = ?`).run(...values)
-}
-
-export function deleteManualShipment(id: number): void {
-  getDb().prepare('DELETE FROM manual_shipment WHERE id = ?').run(id)
-}
-
-export function getManualShipmentList(params: ManualShipmentSearchParams): {
-  items: ManualShipment[]
-  total: number
-} {
-  const db = getDb()
-  const conditions: string[] = []
-  const args: unknown[] = []
-
-  if (params.keyword) {
-    const kw = `%${params.keyword}%`
-    conditions.push('(receiver_name LIKE ? OR product_name LIKE ? OR invoice_no LIKE ? OR toever_order_no LIKE ?)')
-    args.push(kw, kw, kw, kw)
-  }
-  if (params.date_from) { conditions.push('substr(manual_date,1,10) >= ?'); args.push(params.date_from) }
-  if (params.date_to)   { conditions.push('substr(manual_date,1,10) <= ?'); args.push(params.date_to) }
-  if (params.courier_name) { conditions.push('courier_name = ?'); args.push(params.courier_name) }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-  const total = (db.prepare(`SELECT COUNT(*) as cnt FROM manual_shipment ${where}`).get(...args) as { cnt: number }).cnt
-
-  const pageSize = params.page_size ?? 50
-  const page     = params.page ?? 1
-  const offset   = (page - 1) * pageSize
-
-  const items = db.prepare(
-    `SELECT * FROM manual_shipment ${where} ORDER BY manual_date DESC, id DESC LIMIT ? OFFSET ?`
-  ).all(...args, pageSize, offset) as ManualShipment[]
-
-  return { items, total }
 }
 
 // ============================================================

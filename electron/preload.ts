@@ -5,6 +5,7 @@ const api = {
   settings: {
     getAll: () => ipcRenderer.invoke('settings:getAll'),
     save: (settings: unknown) => ipcRenderer.invoke('settings:save', settings),
+    testLogin: () => ipcRenderer.invoke('settings:testLogin'),
   },
 
   // 대시보드
@@ -17,6 +18,7 @@ const api = {
     search: (params: unknown) => ipcRenderer.invoke('orders:search', params),
     getDetail: (id: number) => ipcRenderer.invoke('orders:getDetail', id),
     collect: (params: unknown) => ipcRenderer.invoke('orders:collect', params),
+    clearToday: (orderDate?: string) => ipcRenderer.invoke('orders:clearToday', orderDate),
   },
 
   // 이지어드민
@@ -32,6 +34,7 @@ const api = {
     uploadToever: (params?: { confirmed?: boolean; dryRun?: boolean }) =>
       ipcRenderer.invoke('invoice:uploadToever', params),
     previewUpload: () => ipcRenderer.invoke('invoice:previewUpload'),
+    generatePreviewFile: () => ipcRenderer.invoke('invoice:generatePreviewFile'),
     getDailyStatus: () => ipcRenderer.invoke('invoice:getDailyStatus'),
   },
 
@@ -88,6 +91,7 @@ const api = {
     markSetupComplete:   () => ipcRenderer.invoke('app:markSetupComplete'),
     relaunch:            () => ipcRenderer.invoke('app:relaunch'),
     getDefaultStoragePath: () => ipcRenderer.invoke('app:getDefaultStoragePath'),
+    getVersion:          () => ipcRenderer.invoke('app:getVersion'),
   },
 
   // 파일 탐색기에서 열기
@@ -116,12 +120,17 @@ const api = {
     buildReport:   (params: unknown) => ipcRenderer.invoke('report:buildReport', params),
   },
 
-  // 수기건
-  manual: {
-    create:  (params: unknown)                     => ipcRenderer.invoke('manual:create', params),
-    update:  (id: number, params: unknown)         => ipcRenderer.invoke('manual:update', id, params),
-    delete:  (id: number)                          => ipcRenderer.invoke('manual:delete', id),
-    getList: (params: unknown)                     => ipcRenderer.invoke('manual:getList', params),
+  // 휴일 (스케줄러 자동수집/업로드/백업 스킵)
+  holiday: {
+    getList:      (dateFrom?: string, dateTo?: string) => ipcRenderer.invoke('holiday:getList', dateFrom, dateTo),
+    addCompany:   (date: string, name: string)          => ipcRenderer.invoke('holiday:addCompany', date, name),
+    delete:       (id: number)                          => ipcRenderer.invoke('holiday:delete', id),
+    syncFromApi:  (years: number[])                     => ipcRenderer.invoke('holiday:syncFromApi', years),
+  },
+
+  // 전체 데이터 초기화
+  system: {
+    resetAll: (params?: { confirmed?: boolean }) => ipcRenderer.invoke('system:resetAll', params),
   },
 
   // 자동화 이벤트 구독

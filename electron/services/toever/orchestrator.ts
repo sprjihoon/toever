@@ -4,7 +4,8 @@ import { getDb } from '../db/schema'
 import {
   createRun, updateRunStatus, getRunByIdempotencyKey, resetRunForRetry, getRunById,
   upsertOrderHeader, insertOrderItems, updateOrderStatus,
-  getOrdersForEzadminExport, getOrdersForToeverInvoiceUpload,
+  getOrdersForEzadminExport,
+  getToeverInvoiceUploadRows,
   getOrderItems, addManualReview, saveFileArtifact,
   updateOrderInvoice, invoiceEventRepo,
 } from '../db/repositories'
@@ -12,14 +13,13 @@ import { filterNewShipmentTargets } from '../dedup/duplicateFilter'
 import { parseToeverOrderFile, computeOrderHash } from '../parser/toeverOrderParser'
 import { parseEzadminInvoiceFile } from '../parser/ezadminInvoiceParser'
 import { buildEzadminUploadFile } from '../exporter/ezadminUploadBuilder'
-import { buildToeverInvoiceUploadFile } from '../exporter/toeverInvoiceBuilder'
+import { buildToeverInvoiceUploadFile, buildToeverInvoiceUploadPreviewFile } from '../exporter/toeverInvoiceBuilder'
 import {
   launchBrowser, closeBrowser,
   loginToever, downloadToeverOrders, uploadToeverInvoice,
-  processStoreoutInstruction,
 } from './browser'
 import { DIRS, sha256OfFile, sha256OfBuffer, saveRawFile, buildDatePrefix } from '../storage'
-import { isValidOrderNo, isValidInvoiceNo } from '../parser/safeString'
+import { isValidOrderNo, isValidInvoiceNo, isStandardToeverOrderNo } from '../parser/safeString'
 import type { CollectRound, AppRun } from '../../../shared/types'
 
 // 단일 실행 락
@@ -353,17 +353,18 @@ export async function importEzadminInvoice(params: {
   matched: number
   multi_invoice: number
   orphan: number
+  invalid_format: number
   warnings: string[]
   errors: string[]
 }> {
   const lockKey = 'import_invoice'
   if (!acquireLock(lockKey)) {
-    return { success: false, matched: 0, multi_invoice: 0, orphan: 0, warnings: [], errors: ['이미 실행 중입니다.'] }
+    return { success: false, matched: 0, multi_invoice: 0, orphan: 0, invalid_format: 0, warnings: [], errors: ['이미 실행 중입니다.'] }
   }
 
   try {
     if (!fs.existsSync(params.filePath)) {
-      return { success: false, matched: 0, multi_invoice: 0, orphan: 0, warnings: [], errors: [`파일을 찾을 수 없습니다: ${params.filePath}`] }
+      return { success: false, matched: 0, multi_invoice: 0, orphan: 0, invalid_format: 0, warnings: [], errors: [`파일을 찾을 수 없습니다: ${params.filePath}`] }
     }
     const { rows, fileHash, warnings, errors } = parseEzadminInvoiceFile(params.filePath)
 
@@ -375,7 +376,7 @@ export async function importEzadminInvoice(params: {
           error_message: errors.join('\n'),
           recommended_action: '이지어드민 송장 파일 포맷 확인',
         })
-      return { success: false, matched: 0, multi_invoice: 0, orphan: 0, warnings, errors }
+      return { success: false, matched: 0, multi_invoice: 0, orphan: 0, invalid_format: 0, warnings, errors }
     }
 
     // 파일 hash 중복 확인
@@ -383,7 +384,7 @@ export async function importEzadminInvoice(params: {
     const existingFile = db.prepare('SELECT id FROM file_artifact WHERE sha256 = ?').get(fileHash)
     if (existingFile) {
       return {
-        success: false, matched: 0, multi_invoice: 0, orphan: 0,
+        success: false, matched: 0, multi_invoice: 0, orphan: 0, invalid_format: 0,
         warnings,
         errors: ['이미 import된 파일입니다. (파일 hash 중복)'],
       }
@@ -404,11 +405,21 @@ export async function importEzadminInvoice(params: {
     })
 
     // 주문번호 기준 그룹화
+    // 투에버 정식 주문번호(숫자 19자리)가 아닌 행은 송장 import 대상에서 제외
+    // (예: "_gift" 접미사가 붙은 사은품용 임시 주문번호, 길이가 다른 사내 관리 코드 등)
     const grouped = new Map<string, { invoice_nos: Set<string>; courier: string | null; input_date: string | null }>()
+    let invalidFormatCount = 0
+    const invalidFormatSamples = new Set<string>()
+
     for (const row of rows) {
       if (!row.invoice_no) continue
       if (!isValidInvoiceNo(row.invoice_no)) {
         warnings.push(`주문 ${row.order_no}: 유효하지 않은 송장번호 ${row.invoice_no}`)
+        continue
+      }
+      if (!isStandardToeverOrderNo(row.order_no)) {
+        invalidFormatCount++
+        invalidFormatSamples.add(row.order_no)
         continue
       }
 
@@ -421,6 +432,13 @@ export async function importEzadminInvoice(params: {
       existing.courier = row.courier_name ?? null
       existing.input_date = row.invoice_input_date ?? null
       grouped.set(row.order_no, existing)
+    }
+
+    if (invalidFormatCount > 0) {
+      const sampleList = [...invalidFormatSamples].slice(0, 5).join(', ')
+      warnings.push(
+        `주문번호 형식이 아닌 ${invalidFormatCount}건 제외 (정식 주문번호는 숫자 19자리) — 예: ${sampleList}`
+      )
     }
 
     let matched = 0
@@ -448,35 +466,40 @@ export async function importEzadminInvoice(params: {
 
       if (data.invoice_nos.size > 1) {
         multi_invoice++
-        addManualReview({
-          review_type: 'MULTI_INVOICE',
-          severity: 'HIGH',
-          toever_order_no: order_no,
-          run_id: params.run_id,
-          error_message: `같은 주문번호에 복수 송장번호: ${[...data.invoice_nos].join(', ')}`,
-          recommended_action: '수동으로 올바른 송장번호 선택 필요',
-        })
-        continue
       }
 
-      const invoice_no = [...data.invoice_nos][0]
+      const invoiceList = [...data.invoice_nos]
+      let addedCount = 0
+      let lastInvoice = ''
 
-      // DB 저장
-      updateOrderInvoice(order.id, invoice_no, data.courier, data.input_date)
-      evRepo.insert({
-        order_id: order.id,
-        source_type: 'EZADMIN_IMPORT',
-        invoice_no,
-        courier_name: data.courier,
-        invoice_input_at: data.input_date,
-        status: 'MATCHED',
-        message: null,
-      })
+      for (const invoice_no of invoiceList) {
+        // 이미 import된 송장번호는 중복으로 건너뜀 (재import 시 보존)
+        const existing = db.prepare(
+          'SELECT id FROM invoice_event WHERE order_id = ? AND invoice_no = ?'
+        ).get(order.id, invoice_no) as { id: number } | undefined
 
-      matched++
+        if (existing) continue
+
+        evRepo.insert({
+          order_id: order.id,
+          source_type: 'EZADMIN_IMPORT',
+          invoice_no,
+          courier_name: data.courier,
+          invoice_input_at: data.input_date,
+          status: 'MATCHED',
+          message: invoiceList.length > 1 ? '복수 송장 (분할 출고)' : null,
+        })
+        addedCount++
+        lastInvoice = invoice_no
+      }
+
+      if (addedCount === 0) continue
+
+      updateOrderInvoice(order.id, lastInvoice, data.courier, data.input_date)
+      matched += addedCount
     }
 
-    return { success: true, matched, multi_invoice, orphan, warnings, errors }
+    return { success: true, matched, multi_invoice, orphan, invalid_format: invalidFormatCount, warnings, errors }
   } finally {
     releaseLock(lockKey)
   }
@@ -522,15 +545,15 @@ export function getDailyInvoiceStatus(today: string): {
     if (match) lastUploadCount = parseInt(match[1], 10)
   }
 
-  const orders = getOrdersForToeverInvoiceUpload()
-  const pendingItems = orders.map(o => ({
-    order_no:   o.toever_order_no,
-    invoice_no: o.latest_invoice_no ?? '',
-    recipient:  o.receiver_name     ?? '',
+  const rows = getToeverInvoiceUploadRows()
+  const pendingItems = rows.map(r => ({
+    order_no:   r.toever_order_no,
+    invoice_no: r.invoice_no,
+    recipient:  r.receiver_name ?? '',
   }))
 
   return {
-    pendingCount: orders.length,
+    pendingCount: rows.length,
     uploadedToday,
     lastUploadAt: lastRun?.finished_at ?? null,
     lastUploadCount,
@@ -546,11 +569,34 @@ export function previewToeverInvoiceUpload(): {
   invoice_no: string
   recipient: string
 }[] {
-  return getOrdersForToeverInvoiceUpload().map(o => ({
-    order_no:   o.toever_order_no,
-    invoice_no: o.latest_invoice_no ?? '',
-    recipient:  o.receiver_name     ?? '',
+  return getToeverInvoiceUploadRows().map(r => ({
+    order_no:   r.toever_order_no,
+    invoice_no: r.invoice_no,
+    recipient:  r.receiver_name ?? '',
   }))
+}
+
+/** 실제 업로드 xls 파일 생성 (DB/상태 변경 없음, 업로드 전 확인용) */
+export function generateToeverInvoiceUploadPreview(): {
+  filePath: string
+  rowCount: number
+  rows: Array<{ order_no: string; invoice_no: string; recipient: string }>
+} {
+  const uploadRows = getToeverInvoiceUploadRows()
+  if (uploadRows.length === 0) {
+    throw new Error('투에버 송장 업로드 대상 주문이 없습니다.')
+  }
+  const preview = buildToeverInvoiceUploadPreviewFile(uploadRows)
+  const recipientByKey = new Map(
+    uploadRows.map(r => [`${r.toever_order_no}|${r.invoice_no}`, r.receiver_name ?? ''])
+  )
+  return {
+    ...preview,
+    rows: preview.rows.map(r => ({
+      ...r,
+      recipient: recipientByKey.get(`${r.order_no}|${r.invoice_no}`) ?? '',
+    })),
+  }
 }
 
 export async function uploadToeverInvoiceFile(params: {
@@ -575,14 +621,14 @@ export async function uploadToeverInvoiceFile(params: {
   const errors: string[] = []
 
   try {
-    const orders = getOrdersForToeverInvoiceUpload()
-    if (orders.length === 0) {
+    const rows = getToeverInvoiceUploadRows()
+    if (rows.length === 0) {
       return { success: false, uploaded: 0, failed: 0, errors: ['투에버 송장 업로드 대상 주문이 없습니다.'] }
     }
 
     // 업로드 파일 생성
     params.emit?.('progress', { step: '투에버 송장 업로드 파일 생성 중...' })
-    const { filePath } = buildToeverInvoiceUploadFile(orders, params.run_id)
+    const { filePath } = buildToeverInvoiceUploadFile(rows, params.run_id)
 
     // 브라우저 실행
     params.emit?.('progress', { step: '브라우저 실행 중...' })
@@ -594,7 +640,7 @@ export async function uploadToeverInvoiceFile(params: {
       params.emit?.('progress', { step: '투에버 로그인 중...' })
       const loginResult = await loginToever(page, params.toever_id, params.toever_password, params.run_id)
       if (!loginResult.success) {
-        return { success: false, uploaded: 0, failed: orders.length, errors: [loginResult.error ?? '로그인 실패'] }
+        return { success: false, uploaded: 0, failed: rows.length, errors: [loginResult.error ?? '로그인 실패'] }
       }
 
       // 송장 파일 업로드
@@ -615,19 +661,20 @@ export async function uploadToeverInvoiceFile(params: {
           error_message: uploadResult.error,
           recommended_action: '수동으로 투에버 송장 업로드 페이지에서 재시도',
         })
-        return { success: false, uploaded: 0, failed: orders.length, errors: [uploadResult.error ?? '업로드 실패'] }
+        return { success: false, uploaded: 0, failed: rows.length, errors: [uploadResult.error ?? '업로드 실패'] }
       }
 
       // 성공 - 상태 변경
       const db = getDb()
+      const uniqueOrderIds = [...new Set(rows.map(r => r.order_id))]
       const updateAll = db.transaction(() => {
-        for (const order of orders) {
-          updateOrderStatus(order.id, 'TOEVER_INVOICE_UPLOADED')
+        for (const orderId of uniqueOrderIds) {
+          updateOrderStatus(orderId, 'TOEVER_INVOICE_UPLOADED')
         }
       })
       updateAll()
 
-      return { success: true, uploaded: orders.length, failed: 0, errors }
+      return { success: true, uploaded: rows.length, failed: 0, errors }
     } finally {
       await closeBrowser()
     }

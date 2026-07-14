@@ -70,6 +70,43 @@ export function loadPassword(): string {
 }
 
 /**
+ * 저장된 비밀번호를 실제로 읽을 수 있는지 확인한다.
+ * (다른 PC/사용자에서 DPAPI 복호화 실패 시 false)
+ */
+export function canLoadPassword(): boolean {
+  if (!hasPasswordStored()) return false
+  return loadPassword().trim().length > 0
+}
+
+export type ToeverCredentialsResult =
+  | { ok: true; id: string; password: string }
+  | { ok: false; error: string }
+
+/**
+ * 주문 수집/업로드에 사용할 투에버 계정 정보를 반환한다.
+ */
+export function getToeverCredentials(): ToeverCredentialsResult {
+  const id = (getSetting('toever_id') ?? '').trim()
+  if (!id) {
+    return { ok: false, error: '투에버 ID가 설정되지 않았습니다. 설정 화면에서 ID를 입력해주세요.' }
+  }
+
+  if (hasPasswordStored() && !canLoadPassword()) {
+    return {
+      ok: false,
+      error: '저장된 비밀번호를 이 PC에서 읽을 수 없습니다. 설정에서 비밀번호를 다시 입력하고 저장해주세요.',
+    }
+  }
+
+  const password = loadPassword().trim()
+  if (!password) {
+    return { ok: false, error: '투에버 비밀번호가 설정되지 않았습니다. 설정 화면에서 비밀번호를 입력해주세요.' }
+  }
+
+  return { ok: true, id, password }
+}
+
+/**
  * 비밀번호가 저장되어 있는지 확인 (비밀번호 값 자체를 노출하지 않음)
  */
 export function hasPasswordStored(): boolean {
